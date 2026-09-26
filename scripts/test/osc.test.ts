@@ -10,7 +10,7 @@ test('round-trips a message with float, string and explicit int', () => {
   assert.deepEqual(m.args, ['ZL', 1, 2.5]);
 });
 
-test('numbers encode as floats by default', () => {
+test('integer-valued numbers encode as i by default', () => {
   const m = decodeMessage(encodeMessage('/x', [9001, 0]));
   assert.equal(m.types, 'ii');
   assert.deepEqual(m.args, [9001, 0]);

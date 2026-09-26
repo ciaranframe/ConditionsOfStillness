@@ -149,9 +149,11 @@ source port (`9001`), so AirKit keys slot *n* as device port `9001 + n − 1` (s
   `pos.lag(fadeSec)`, then `level` (linear, lagged), then sums to the master bus.
 - Slot 9 has its own monitor (`\cosAuditionMonitor`, plain gain).
 - Master stage `\cosMaster`: `masterGain` (lagged) then a `Limiter.ar` safety (−1 dBFS ceiling,
-  disable with `COS_LIMITER=0`) to hardware out 0/1.
-- Per-wrist `SendPeakRMS` taps pre-level on the crossfaded signal; the profile broadcasts
-  `/airkit/cos/levels` to the last runner address at 10 Hz.
+  0.003 s lookahead — 6 ms total latency, not 20 ms; a drummer notices — disable with
+  `COS_LIMITER=0`) to hardware out 0/1.
+- Per-wrist `SendPeakRMS` taps post-level (what the room hears; decided 2026-09-26) on the
+  crossfaded signal; the profile broadcasts `/airkit/cos/levels` to the last runner address at
+  10 Hz.
 
 ### OSC additions (all `[COS]` in `API.md`)
 | Address | Args | Semantics |
@@ -162,13 +164,15 @@ source port (`9001`), so AirKit keys slot *n* as device port `9001 + n − 1` (s
 | `/airkit/cos/params` | `slot k v k v …` | stores `topEnvironment[\cosSlotParams][slot]` (Event; values numbers or strings); if the slot has an env, `d.env.use { ~onSceneParams.(params) }`. |
 | `/airkit/cos/partner` | `slot partnerSlot` (0 = none) | stores `topEnvironment[\cosSlotPartner][slot]`; if the slot has an env, sets `d.env[\partner]` to the partner device. |
 | `/airkit/cos/audition` | `wrist` | tells the profile which wrist's IMU the runner is currently mirroring to slot 9 (informational, for status). |
-| `/airkit/cos/getStatus` | — | replies `/airkit/cos/status/reply` with a JSON string: per slot `{name, tickAgeMs}` (age of the last completed tick; a dead tick loop shows as a growing age), per wrist `{pos, level}`, `master`, `serverCpu`, `limiterActive`. |
+| `/airkit/cos/getStatus` | — | replies `/airkit/cos/status/reply` with a JSON string: per slot `{name, tickAgeMs, initAgeMs, ready}` (`tickAgeMs` = age of the last completed tick, a dead tick loop shows as a growing age; `initAgeMs` = age of that load's completed `~init`; `ready` = loaded **and** `~init` has completed for the current load — loaded ≠ ready, see §5.1), per wrist `{pos, level}`, `master`, `serverCpu`, `limiterOn`, `deviceCount`, `auditionLevel`. |
 | `/airkit/cos/levels` | broadcast 10 Hz | `ZLpeak ZLrms ZRpeak … masterPeak masterRms`. |
 | `/airkit/cos/panic` | — | every wrist level → 0 over 0.2 s, then `loadPersonality slot 0` for all 9 slots. |
 
 Existing calls used unchanged: `/airkit/loadPersonality slotPort index`, `/airkit/getRoster`,
-`/airkit/getSeats`, `/airkit/personalityName` (broadcast, used as load confirmation),
-`/airkit/reLoadPersonality`.
+`/airkit/getSeats`, `/airkit/personalityName` (broadcast; sclang-local only — sent via
+`NetAddr.new("127.0.0.1", …)`, so it never reaches the runner and is not usable as a load
+confirmation; see §5.1). `/airkit/reLoadPersonality` remains local-only (sclang's own port) and is
+not used by the runner — it reloads by loading `silence` (index 0) then the incoming patch.
 
 ### Patch contract additions (documented in the profile and the skill's `engine.md`)
 - `~sceneParams`: read `topEnvironment[\cosSlotParams][d.index]` in `~init` (params may arrive
@@ -186,8 +190,9 @@ Existing calls used unchanged: `/airkit/loadPersonality slotPort index`, `/airki
 ### Load and fade sequence (runner-driven; the engine is stateless beyond what is listed)
 1. Runner decides the wrist's **standby slot** (the one the crossfader is not on).
 2. `/airkit/cos/params standby …`, `/airkit/cos/partner standby …`, then
-   `/airkit/loadPersonality standbyPort index`. Confirmation = `/airkit/personalityName` broadcast
-   or the next `/airkit/getSeats` reply naming the patch.
+   `/airkit/loadPersonality standbyPort index`. Confirmation = the next `/airkit/getSeats` reply
+   naming the patch, then `ready:true` for that slot in `/airkit/cos/getStatus` — the
+   `/airkit/personalityName` broadcast is sclang-local and never reaches the runner (§5.1).
 3. On cue: `/airkit/cos/level wrist sceneLevel fade` and `/airkit/cos/xfade wrist pos fade`.
 4. After `fade` elapses: `/airkit/loadPersonality outgoingPort 0` (silence).
 5. Immediately preload the next scene's incoming sound for that wrist into the now-free slot
@@ -195,6 +200,47 @@ Existing calls used unchanged: `/airkit/loadPersonality slotPort index`, `/airki
 Fast presses: a cue arriving mid-fade for the same wrist first completes the running fade in
 0.1 s, runs step 4, then starts the new transition. Back behaves exactly like next with the
 previous scene as target.
+
+### 5.1 Engine facts the runner must design around (from the 2026-09-26 engine review)
+
+- **Loaded ≠ ready.** A slot that just received `/airkit/loadPersonality` is not yet making sound
+  on the new patch — use the per-slot `ready` field from `/airkit/cos/getStatus`, not the
+  `getSeats`/`loadPersonality` round-trip alone, to decide a load has taken effect.
+- **Devices exist only after IMU arrives**, and calling `loadPersonality` on a port with no device
+  throws inside the OSC handler. At startup, send one rest-pose IMU packet to all nine slots so
+  every device exists before the runner issues its first load, then reconcile against
+  `/airkit/getSeats`.
+- **A stick dropping WiFi removes nothing.** The patch keeps ticking on frozen sensor data — the
+  engine has no concept of stick liveness. Detecting a dead stick (and reflecting that on Admin) is
+  entirely the runner's job.
+- **Only an sclang restart re-creates devices**, and on dead→alive everything sclang held is lost:
+  wrists reset to pos 0 / level 1, master to 1, and every slot's params and partner are gone. On
+  reconnect, re-push in this order: master, then per-wrist level and xfade, then params and
+  partner for every slot, then the loads themselves.
+- **Always send `/airkit/cos/params slot …` (empty is fine) and `/airkit/cos/partner slot 0`
+  before every load**, even when there is nothing to set — both persist per slot across loads, so
+  a stale value from a previous scene otherwise leaks into the next patch on that slot.
+- **Handlers can fire early or late relative to a patch's own lifecycle**: a tick or scene-param
+  update can land on a new env before its `~init` has run, and on the old patch sitting in a
+  standby slot after a load was requested but hasn't landed. Patches must nil-guard (tracked as an
+  `engine.md` skill item for patch authors); the runner cannot prevent this from its side.
+- **For `2H` patches, `~partner.env[\model]` always exists** — every device runs at least
+  `silence`, so there is no nil case. Re-read `~partner.env[\model]` on every tick rather than
+  caching it, since the partner's env is replaced whenever that slot reloads.
+- **Panic is not fire-and-forget for the runner**: it must cancel its own pending post-fade timers
+  (the step-4 "unload after `fade` elapses" callbacks) when it sends `/airkit/cos/panic`, or a
+  stale timer will re-trigger a load after the panic has already silenced everything.
+- **Steady-state CPU is eight live patches**, not "only around transitions" — every wrist's
+  standby slot is preloaded and ticking even while silent, so idle CPU load is the real load. Watch
+  sclang's own CPU, not just `serverCpu` (which is scsynth only) — this is where the Runner should
+  measure headroom.
+- **The levels broadcast goes to the last `/airkit/cos/*` sender.** A one-off tool (e.g.
+  `engine-ping.ts`) that queries the engine steals the levels stream from the runner for up to one
+  poll interval. The runner should poll `getStatus` at least every 2 s so it reclaims the levels
+  target promptly and its own liveness check doesn't stall behind another tool's poll.
+- **A press mid-fade is handled by re-sending the same `pos` with `fadeSec 0.1`** rather than a
+  special code path — `VarLag` retargets from its current value, so re-issuing `xfade` with a short
+  fade completes the in-flight crossfade quickly without a discontinuity.
 
 ## 6. Runner (`runner/`)
 

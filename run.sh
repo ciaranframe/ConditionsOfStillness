@@ -20,7 +20,7 @@ LOG="${COS_AIRKIT_LOG:-$HOME/.conditions/airkit.log}"
 [ -x "$SCLANG" ] || { echo "run.sh: SuperCollider not found at $SCLANG" >&2; exit 1; }
 [ -f "$MAIN" ] || { echo "run.sh: $MAIN missing — run ./setup.sh first" >&2; exit 1; }
 mkdir -p "$(dirname "$LOG")"
-: > "$LOG"
+[ -f "$LOG" ] && mv -f "$LOG" "$LOG.1"
 
 # On Ctrl-C / TERM / exit: kill sclang (our child) and the scsynth it spawned (not our child).
 # sclang runs in the background and is wait-ed on so the trap can fire between commands.

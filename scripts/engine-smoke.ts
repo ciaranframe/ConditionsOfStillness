@@ -95,6 +95,8 @@ async function main() {
     for (let i = 0; i < 25; i++) { await sleep(200); s = await seats(); if (s[9007] === 'COS_Template' && s[9001] === 'COS_Template') break; }
     check(s[9007] === 'COS_Template' && s[9001] === 'COS_Template', 'COS_Template loaded on slots 1 and 7');
     await sleep(500);
+    st = await status();
+    check(st?.slots?.[0]?.ready === true, 'slot 1 ready:true right after the first load completes (Review Focus E3)');
     check(/\[COS_Template\] slot 7 register low partner 5/.test(log()), 'slot 7 read params and partner sent before it existed (Review Focus 1)');
     check(/\[COS_Template\] slot 1 register mid partner none/.test(log()), 'slot 1 defaults with no params');
 
@@ -133,6 +135,27 @@ async function main() {
     lv = await freshLevels();
     check(lv !== null && lv[0] > 0.002, `ZL loud again after crossfading back (peak ${lv?.[0]})`);
 
+    // 7b. crossfade DIRECTION check: slot 2 was silence above, so "quiet at pos 1" there can't
+    // distinguish "pos correctly selects slot 2" from "fades to whatever's quieter". Put an
+    // audible patch on slot 2 too, hold slot 1 still and move slot 2 instead, and confirm pos 1
+    // picks up slot 2's sound while pos 0 picks up slot 1's silence (Review Focus: crossfade direction).
+    moving = new Set([2]);
+    send('/airkit/loadPersonality', [9002, 1]);
+    for (let i = 0; i < 25; i++) { await sleep(200); s = await seats(); if (s[9002] === 'COS_Template') break; }
+    check(s[9002] === 'COS_Template', 'COS_Template loaded on slot 2 for the crossfade direction check');
+    send('/airkit/cos/xfade', ['ZL', 1, 0.1]);
+    await sleep(1500);
+    lv = await freshLevels();
+    check(lv !== null && lv[0] > 0.002, `pos 1 selects the second slot: ZL peaks with slot 2 moving, slot 1 still (peak ${lv?.[0]})`);
+    send('/airkit/cos/xfade', ['ZL', 0, 0.1]);
+    await sleep(1500);
+    lv = await freshLevels();
+    check(lv !== null && lv[0] < 0.01, `pos 0 selects the first slot: ZL quiet with slot 1 still (peak ${lv?.[0]})`);
+    moving = new Set([1]);
+    send('/airkit/loadPersonality', [9002, 0]);
+    for (let i = 0; i < 25; i++) { await sleep(200); s = await seats(); if (s[9002] === 'silence') break; }
+    check(s[9002] === 'silence', 'slot 2 back to silence after the crossfade direction check');
+
     // 8. panic (Review Focus 5)
     send('/airkit/cos/panic');
     await sleep(1500);
@@ -142,6 +165,22 @@ async function main() {
     check(st && Object.values(st.wrists).every((w: any) => w.level === 0), 'every wrist level 0 after panic');
     lv = await freshLevels();
     check(lv !== null && lv[0] < 0.01 && lv[10] < 0.01, 'silent after panic');
+
+    // 8b. recovery from panic: nothing restores the audition monitor or a wrist's level on its
+    // own — the runner must explicitly re-send them, and a reload must reach ready:true again
+    // (Review Focus E1, E3).
+    send('/airkit/cos/level', ['ZL', 1, 0.1]);
+    send('/airkit/cos/level', ['audition', 1, 0.1]);
+    send('/airkit/loadPersonality', [9001, 1]);
+    for (let i = 0; i < 25; i++) { await sleep(200); s = await seats(); if (s[9001] === 'COS_Template') break; }
+    check(s[9001] === 'COS_Template', 'slot 1 reloads COS_Template after panic');
+    for (let i = 0; i < 25; i++) { await sleep(200); st = await status(); if (st?.slots?.[0]?.ready === true) break; }
+    check(st?.slots?.[0]?.ready === true, 'slot 1 ready:true again after the post-panic reload');
+    check(st?.auditionLevel === 1, 'auditionLevel restored to 1 via /airkit/cos/level audition (Review Focus E1)');
+    moving = new Set([1]);
+    await sleep(1500);
+    lv = await freshLevels();
+    check(lv !== null && lv[0] > 0.002, `ZL peaks again after panic recovery (peak ${lv?.[0]})`);
 
     // 9. log hygiene
     const bad = log().split('\n').filter((l) => /ERROR|not understood|FAILURE|DoesNotUnderstand/.test(l));
