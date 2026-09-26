@@ -28,10 +28,6 @@ async function main() {
   mkdirSync(join(homedir(), '.conditions'), { recursive: true });
   spawnSync('pkill', ['-f', `scsynth -u ${SCSYNTH}`]);
   const logFd = openSync(LOG, 'w');
-  const child = spawn(SCLANG, ['-u', String(LANG), MAIN], {
-    env: { ...process.env, COS_SCSYNTH_PORT: String(SCSYNTH), COS_LIMITER: '1', COS_SAMPLES: join(ROOT, 'samples') },
-    stdio: ['ignore', logFd, logFd],
-  });
   const log = () => readFileSync(LOG, 'utf8');
 
   // control socket (any port) and stick socket (fixed source port 9001)
@@ -39,8 +35,10 @@ async function main() {
   const sticks: Socket = createSocket('udp4');
   const inbox: OscMessage[] = [];
   ctl.on('message', (buf) => { for (const m of flattenPacket(Buffer.from(buf))) inbox.push(m); });
-  await new Promise<void>((r) => ctl.bind(0, r));
-  await new Promise<void>((r) => sticks.bind(SRC, r));
+  // Persistent handlers: without one, a socket 'error' (e.g. EADDRINUSE on bind) is an
+  // unhandled event and crashes the process outside try/finally, leaking the engine.
+  ctl.on('error', (e) => { failures.push(`ctl socket error: ${String(e)}`); });
+  sticks.on('error', (e) => { failures.push(`sticks socket error: ${String(e)}`); });
   const send = (a: string, args: (number | string)[] = []) => ctl.send(encodeMessage(a, args), LANG, '127.0.0.1');
   const take = (address: string) => { const i = inbox.findIndex((m) => m.address === address); return i < 0 ? null : inbox.splice(i, 1)[0]; };
   const ask = async (a: string, reply: string, ms = 1500) => { send(a); const t0 = Date.now(); while (Date.now() - t0 < ms) { const m = take(reply); if (m) return m; await sleep(20); } return null; };
@@ -51,15 +49,27 @@ async function main() {
   // fake sticks: slot n streams /n/IMUFusedData ax ay az qx qy qz qw at ~33 Hz; slot 1 moves when told
   let moving = new Set<number>();
   let t = 0;
-  const imu = setInterval(() => {
-    t += 0.03;
-    for (let n = 1; n <= 9; n++) {
-      const az = moving.has(n) ? -9.8 + 4 * Math.sin(2 * Math.PI * 4 * t) : -9.8;
-      sticks.send(encodeMessage(`/${n}/IMUFusedData`, [0, 0, az, 0, 0, 0, 1], 'fffffff'), LANG, '127.0.0.1');
-    }
-  }, 30);
+  let child: ReturnType<typeof spawn> | null = null;
+  let imu: ReturnType<typeof setInterval> | null = null;
 
   try {
+    // spawn and bind here (inside try) so a failure (e.g. a bad exec or a bind on a port
+    // already in use) still hits the finally below and kills whatever already started.
+    child = spawn(SCLANG, ['-u', String(LANG), MAIN], {
+      env: { ...process.env, COS_SCSYNTH_PORT: String(SCSYNTH), COS_LIMITER: '1', COS_SAMPLES: join(ROOT, 'samples') },
+      stdio: ['ignore', logFd, logFd],
+    });
+    await new Promise<void>((res, rej) => { ctl.once('error', rej); ctl.bind(0, () => res()); });
+    await new Promise<void>((res, rej) => { sticks.once('error', rej); sticks.bind(SRC, () => res()); });
+
+    imu = setInterval(() => {
+      t += 0.03;
+      for (let n = 1; n <= 9; n++) {
+        const az = moving.has(n) ? -9.8 + 4 * Math.sin(2 * Math.PI * 4 * t) : -9.8;
+        sticks.send(encodeMessage(`/${n}/IMUFusedData`, [0, 0, az, 0, 0, 0, 1], 'fffffff'), LANG, '127.0.0.1');
+      }
+    }, 30);
+
     // 1. boot
     let up = false;
     for (let i = 0; i < 75 && !up; i++) { await sleep(2000); up = log().includes('Conditions AirKit up'); }
@@ -139,7 +149,7 @@ async function main() {
   } catch (e) {
     failures.push(String(e));
   } finally {
-    clearInterval(imu);
+    if (imu) clearInterval(imu);
     ctl.close(); sticks.close();
     if (!KEEP) killEngine(child);
   }
