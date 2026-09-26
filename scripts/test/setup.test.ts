@@ -185,3 +185,35 @@ test('setup.ts --yes fetches the mirror into ~/AirKit and adds the airkit worktr
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+const REAL_SC_APP = '/Applications/SuperCollider.app';
+
+test('setup.ts --yes exits 0 when every check but airkit is already satisfied and the one fix succeeds', (t) => {
+  if (!existsSync(REAL_SC_APP)) {
+    t.skip(`${REAL_SC_APP} not present on this machine`);
+    return;
+  }
+  const root = mkdtempSync(join(tmpdir(), 'cos-'));
+  const { mirrorDir, sha } = buildLocalMirror();
+  const ext = mkdtempSync(join(tmpdir(), 'ext-'));
+  try {
+    mkdirSync(join(ext, 'SC3plugins'), { recursive: true });
+    writeFileSync(join(ext, 'SC3plugins', 'x.sc'), ''); // pre-seeded: sc3-plugins check is ok, no fix
+    writeFileSync(join(root, 'airkit.lock'), `branch=AirConditions\nsha=${sha}\nupstream=${FAKE_UPSTREAM}\nmirror=${mirrorDir}\n`);
+    const { code, out } = run({
+      COS_REPO_ROOT: root,
+      COS_AIRKIT_HOME: join(root, 'no-airkit-home'), // does not exist -> action is clone-mirror
+      COS_SC_APP: REAL_SC_APP, // real, installed app -> supercollider check is ok, no fix needed
+      COS_SC_EXTENSIONS: ext,
+    }, ['--yes']);
+    assert.equal(code, 0, out);
+    assert.match(out, /fixes: 1 ok, 0 failed/);
+    assert.doesNotMatch(out, /still need you/);
+    const airkit = join(root, 'airkit');
+    assert.equal(existsSync(join(airkit, '.git')), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(mirrorDir, { recursive: true, force: true });
+    rmSync(ext, { recursive: true, force: true });
+  }
+});

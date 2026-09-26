@@ -96,7 +96,9 @@ function airkitState() {
   return { worktreeExists, worktreeBroken, worktreeBranch, homeCloneExists, homeCloneHasBranch };
 }
 
-const fixes: Array<{ name: string; run: () => void }> = [];
+// `check` names the Check this fix repairs, so the post-fix-loop exit code can tell "a fix ran
+// and failed" apart from "this failing check never had an automatic fix" (see the fix loop below).
+const fixes: Array<{ name: string; check: string; run: () => void }> = [];
 const checks: Check[] = [];
 const lock: Lock = parseLock(readFileSync(join(ROOT, 'airkit.lock'), 'utf8'));
 
@@ -118,7 +120,7 @@ if (pluginsPresent(SC_EXT)) {
   checks.push({ name: 'sc3-plugins', ok: true, detail: join(SC_EXT, 'SC3plugins') });
 } else {
   checks.push({ name: 'sc3-plugins', ok: false, detail: 'not installed', fix: `./setup.sh installs 3.14.0 into ${SC_EXT}` });
-  fixes.push({ name: 'install sc3-plugins 3.14.0', run: () => {
+  fixes.push({ name: 'install sc3-plugins 3.14.0', check: 'sc3-plugins', run: () => {
     const result = installSc3Plugins({
       extensionsDir: SC_EXT,
       fetchArchive: (zip) => {
@@ -148,7 +150,7 @@ if (st.worktreeBroken) {
     checks.push({ name: 'airkit-worktree', ok: false, detail: `airkit/ is on ${st.worktreeBranch}, expected ${lock.branch}`, fix: `git -C airkit checkout ${lock.branch}` });
   } else {
     checks.push({ name: 'airkit-worktree', ok: false, detail: `missing; planned action: ${action}`, fix: './setup.sh' });
-    fixes.push({ name: `airkit: ${action}`, run: () => {
+    fixes.push({ name: `airkit: ${action}`, check: 'airkit-worktree', run: () => {
       if (action === 'clone-mirror') {
         const c = sh('git', ['clone', '--origin', 'mirror', '--branch', lock.branch, lock.mirror, WORKTREE], undefined, GIT_ENV);
         if (!c.ok) throw new Error(c.out);
@@ -189,7 +191,7 @@ for (const [name, dir] of [['runner-deps', 'runner'], ['tools-deps', 'patching/t
   if (!existsSync(pkg)) { checks.push({ name, ok: true, detail: `${dir}/ not present yet` }); continue; }
   const has = existsSync(join(ROOT, dir, 'node_modules'));
   checks.push({ name, ok: has, detail: has ? 'installed' : 'missing', fix: `npm ci in ${dir}/` });
-  if (!has) fixes.push({ name: `npm ci in ${dir}`, run: () => { const r = sh('npm', ['ci'], join(ROOT, dir)); if (!r.ok) throw new Error(r.out); } });
+  if (!has) fixes.push({ name: `npm ci in ${dir}`, check: name, run: () => { const r = sh('npm', ['ci'], join(ROOT, dir)); if (!r.ok) throw new Error(r.out); } });
 }
 
 // samples manifests
@@ -223,6 +225,7 @@ if (!YES) {
 }
 let fixesOk = 0;
 let fixesFailed = 0;
+const fixedChecks = new Set(fixes.map((f) => f.check));
 for (const f of fixes) {
   console.log(`\n== ${f.name}`);
   try {
@@ -234,7 +237,10 @@ for (const f of fixes) {
     console.log(`[failed] ${f.name}: ${msg.split('\n')[0]}`);
   }
 }
-console.log(`\nfixes: ${fixesOk} ok, ${fixesFailed} failed`);
-if (fixesFailed > 0) process.exit(1);
+// A check that was failing and never had an automatic fix (e.g. supercollider, ffmpeg — install
+// by hand) must not make a fully successful fix run report failure; only count those against it.
+const unfixable = checks.filter((c) => !c.ok && !fixedChecks.has(c.name)).length;
+console.log(`\nfixes: ${fixesOk} ok, ${fixesFailed} failed${unfixable > 0 ? `; ${unfixable} item(s) still need you` : ''}`);
+if (fixesFailed > 0 || unfixable > 0) process.exit(1);
 console.log('\nre-run ./setup.sh --check to confirm.');
-process.exit(failing === 0 ? 0 : 1);
+process.exit(0);
