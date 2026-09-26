@@ -5,6 +5,7 @@
   "engines": { "node": ">=22.18" },
   "scripts": {
     "test": "node --test \"scripts/test/*.test.ts\"",
-    "setup:check": "node scripts/setup.ts --check"
+    "setup:check": "node scripts/setup.ts --check",
+    "smoke": "node scripts/engine-smoke.ts"
   }
 }
