@@ -1,6 +1,6 @@
 # Conditions of Stillness — AirStick system — index
 
-**Status:** architecture designed 2026-09-26; foundation being built; patches not started.
+**Status:** architecture designed 2026-09-26; foundation and engine profile built and merged 2026-09-26; runner next; patches not started.
 **Trajectory:** foundation → engine profile → runner + pages → patch skill + tooling → patches (with Ciaran's per-scene context) → rehearsal 1.
 
 ## Versions
@@ -15,9 +15,9 @@
 - 2026-09-26 — Generic `airkit-patch` skill + piece profile; six research tracks; corpus mining; shopping-list samples.
 - 2026-09-26 — Piece repo here + AirKit worktree on `AirConditions`; private mirror repo, not a fork.
 - 2026-09-26 — Tooling and skill before any patch.
+- 2026-09-26 — Page design locked after mockup feedback: cockpit style, colour = status only, "SCENE D" dominant, real stick names, status strip. Mockup: https://claude.ai/artifact/DdTVyHA4x2BFFuGCGrxYT1
 
 ## Related
 - Spec: `../../docs/superpowers/specs/2026-09-26-conditions-of-stillness-architecture-design.md`
 - PatchMarks plugin: `../../docs/superpowers/specs/2026-09-15-patch-marks-plugin-design.md`
 - Parking lot: `../_parking-lot.md`
-- 2026-09-26 — Page design locked after mockup feedback: cockpit style, colour = status only, "SCENE D" dominant, real stick names, status strip. Mockup: https://claude.ai/artifact/DdTVyHA4x2BFFuGCGrxYT1
