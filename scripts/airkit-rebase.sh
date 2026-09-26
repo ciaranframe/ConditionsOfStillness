@@ -8,7 +8,7 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 WT="${COS_AIRKIT_WORKTREE:-$HERE/airkit}"
 DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1
 
-if [ -n "$(git -C "$WT" status --porcelain | grep -v '.DS_Store')" ]; then
+if [ -n "$(git -C "$WT" status --porcelain | grep -v '\.DS_Store')" ]; then
   echo "airkit-rebase: worktree is dirty ($WT). Commit or stash first." >&2; exit 3
 fi
 BR="$(git -C "$WT" rev-parse --abbrev-ref HEAD)"
@@ -26,12 +26,19 @@ if [ "$DRY" = "1" ]; then
   exit 0
 fi
 
+BEFORE="$(git -C "$WT" rev-parse HEAD)"
 if ! git -C "$WT" rebase origin/AirConcert >/dev/null 2>&1; then
   echo "airkit-rebase: CONFLICT. Files:" >&2
   git -C "$WT" diff --name-only --diff-filter=U | sed 's/^/  /' >&2
   git -C "$WT" rebase --abort
-  echo "Aborted; tree restored. Resolve by hand only by re-applying OUR commits on top of Steph's lines — never rewrite hers." >&2
-  exit 2
+  AFTER="$(git -C "$WT" rev-parse HEAD)"
+  if [ "$AFTER" = "$BEFORE" ] && [ -z "$(git -C "$WT" status --porcelain | grep -v '\.DS_Store')" ]; then
+    echo "Aborted; tree restored. Resolve by hand only by re-applying OUR commits on top of Steph's lines — never rewrite hers." >&2
+    exit 2
+  else
+    echo "airkit-rebase: abort did NOT restore the tree — HEAD was $BEFORE; inspect $WT by hand" >&2
+    exit 1
+  fi
 fi
 git -C "$WT" push --force-with-lease mirror AirConditions || { echo "airkit-rebase: mirror push failed (rebase kept)" >&2; exit 1; }
 SHA="$(git -C "$WT" rev-parse HEAD)"

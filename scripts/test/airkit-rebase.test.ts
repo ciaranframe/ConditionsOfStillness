@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -28,35 +28,49 @@ function run(wt: string, ...a: string[]) {
 
 test('refuses a dirty worktree with exit 3', () => {
   const w = world();
-  writeFileSync(join(w.wt, 'ours.txt'), 'edited\n');
-  const r = run(w.wt);
-  assert.equal(r.code, 3);
-  assert.match(r.out, /dirty/);
+  try {
+    writeFileSync(join(w.wt, 'ours.txt'), 'edited\n');
+    const r = run(w.wt);
+    assert.equal(r.code, 3);
+    assert.match(r.out, /dirty/);
+  } finally {
+    rmSync(w.root, { recursive: true, force: true });
+  }
 });
 
 test('rebases onto new upstream commits and force-pushes the mirror', () => {
   const w = world();
-  writeFileSync(join(w.seed, 'shared.txt'), 'v2\n'); g(w.seed, 'commit', '-q', '-am', 'steph: v2'); g(w.seed, 'push', '-q', 'origin', 'AirConcert');
-  const dry = run(w.wt, '--dry-run');
-  assert.equal(dry.code, 0);
-  assert.match(dry.out, /steph: v2/);
-  assert.match(dry.out, /would run: git rebase origin\/AirConcert/);
-  const r = run(w.wt);
-  assert.equal(r.code, 0);
-  assert.equal(readFileSync(join(w.wt, 'shared.txt'), 'utf8'), 'v2\n');
-  const mirrorHead = g(w.mirror, 'rev-parse', 'AirConditions').stdout.trim();
-  assert.equal(mirrorHead, g(w.wt, 'rev-parse', 'HEAD').stdout.trim());
-  assert.match(r.out, /sha=/);
+  try {
+    writeFileSync(join(w.seed, 'shared.txt'), 'v2\n'); g(w.seed, 'commit', '-q', '-am', 'steph: v2'); g(w.seed, 'push', '-q', 'origin', 'AirConcert');
+    const dry = run(w.wt, '--dry-run');
+    assert.equal(dry.code, 0);
+    assert.match(dry.out, /steph: v2/);
+    assert.match(dry.out, /would run: git rebase origin\/AirConcert/);
+    assert.equal(readFileSync(join(w.wt, 'shared.txt'), 'utf8'), 'v1\n');
+    const r = run(w.wt);
+    assert.equal(r.code, 0);
+    assert.equal(readFileSync(join(w.wt, 'shared.txt'), 'utf8'), 'v2\n');
+    const mirrorHead = g(w.mirror, 'rev-parse', 'AirConditions').stdout.trim();
+    assert.equal(mirrorHead, g(w.wt, 'rev-parse', 'HEAD').stdout.trim());
+    assert.match(r.out, /sha=/);
+  } finally {
+    rmSync(w.root, { recursive: true, force: true });
+  }
 });
 
 test('aborts on conflict with exit 2 and leaves the tree as it was', () => {
   const w = world();
-  writeFileSync(join(w.wt, 'shared.txt'), 'cos edit\n'); g(w.wt, 'commit', '-q', '-am', 'cos: touch shared');
-  const before = g(w.wt, 'rev-parse', 'HEAD').stdout.trim();
-  writeFileSync(join(w.seed, 'shared.txt'), 'steph edit\n'); g(w.seed, 'commit', '-q', '-am', 'steph: touch shared'); g(w.seed, 'push', '-q', 'origin', 'AirConcert');
-  const r = run(w.wt);
-  assert.equal(r.code, 2);
-  assert.match(r.out, /shared\.txt/);
-  assert.equal(g(w.wt, 'rev-parse', 'HEAD').stdout.trim(), before);
-  assert.equal(g(w.wt, 'status', '--porcelain').stdout.trim(), '');
+  try {
+    writeFileSync(join(w.wt, 'shared.txt'), 'cos edit\n'); g(w.wt, 'commit', '-q', '-am', 'cos: touch shared');
+    const before = g(w.wt, 'rev-parse', 'HEAD').stdout.trim();
+    writeFileSync(join(w.seed, 'shared.txt'), 'steph edit\n'); g(w.seed, 'commit', '-q', '-am', 'steph: touch shared'); g(w.seed, 'push', '-q', 'origin', 'AirConcert');
+    const r = run(w.wt);
+    assert.equal(r.code, 2);
+    assert.match(r.out, /shared\.txt/);
+    assert.doesNotMatch(r.out, /did NOT restore/);
+    assert.equal(g(w.wt, 'rev-parse', 'HEAD').stdout.trim(), before);
+    assert.equal(g(w.wt, 'status', '--porcelain').stdout.trim(), '');
+  } finally {
+    rmSync(w.root, { recursive: true, force: true });
+  }
 });
