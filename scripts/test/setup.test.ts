@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -21,41 +21,54 @@ function fakeRepo(): string {
 test('--check on a bare machine names every missing piece and exits 1 without touching anything', () => {
   const root = fakeRepo();
   const ext = mkdtempSync(join(tmpdir(), 'ext-'));
-  const before = readdirSync(root);
-  const { code, out } = run({ COS_REPO_ROOT: root, COS_SC_APP: join(root, 'nope.app'), COS_SC_EXTENSIONS: ext, COS_AIRKIT_HOME: join(root, 'no-airkit') });
-  assert.equal(code, 1);
-  assert.match(out, /\[!!\] supercollider: not found/);
-  assert.match(out, /\[!!\] sc3-plugins: not installed/);
-  assert.match(out, /\[!!\] airkit-worktree: .*clone-mirror/);
-  assert.match(out, /airkit-lock: unknown/);
-  assert.deepEqual(readdirSync(root), before);
-  assert.deepEqual(readdirSync(ext), []);
+  try {
+    const before = readdirSync(root);
+    const { code, out } = run({ COS_REPO_ROOT: root, COS_SC_APP: join(root, 'nope.app'), COS_SC_EXTENSIONS: ext, COS_AIRKIT_HOME: join(root, 'no-airkit') });
+    assert.equal(code, 1);
+    assert.match(out, /\[!!\] supercollider: not found/);
+    assert.match(out, /\[!!\] sc3-plugins: not installed/);
+    assert.match(out, /\[!!\] airkit-worktree: .*clone-mirror/);
+    assert.match(out, /airkit-lock: unknown/);
+    assert.deepEqual(readdirSync(root), before);
+    assert.deepEqual(readdirSync(ext), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(ext, { recursive: true, force: true });
+  }
 });
 
 test('--check reports add-worktree when the home clone has the branch but the worktree is missing, even with a dirty home tree', () => {
   const root = fakeRepo();
-  const home = join(root, 'AirKit');
-  mkdirSync(home);
-  const g = (...a: string[]) => spawnSync('git', ['-C', home, ...a], { encoding: 'utf8' });
-  g('init', '-q', '-b', 'AirConcert');
-  writeFileSync(join(home, 'f'), '1');
-  g('add', 'f'); g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'base');
-  g('branch', 'AirConditions');
-  writeFileSync(join(home, 'f'), 'dirty');
-  const { out } = run({ COS_REPO_ROOT: root, COS_AIRKIT_HOME: home, COS_SC_APP: join(root, 'nope.app'), COS_SC_EXTENSIONS: root });
-  assert.match(out, /airkit-worktree: .*add-worktree/);
-  assert.equal(g('status', '--porcelain').stdout.trimEnd(), ' M f');
+  try {
+    const home = join(root, 'AirKit');
+    mkdirSync(home);
+    const g = (...a: string[]) => spawnSync('git', ['-C', home, ...a], { encoding: 'utf8' });
+    g('init', '-q', '-b', 'AirConcert');
+    writeFileSync(join(home, 'f'), '1');
+    g('add', 'f'); g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'base');
+    g('branch', 'AirConditions');
+    writeFileSync(join(home, 'f'), 'dirty');
+    const { out } = run({ COS_REPO_ROOT: root, COS_AIRKIT_HOME: home, COS_SC_APP: join(root, 'nope.app'), COS_SC_EXTENSIONS: root });
+    assert.match(out, /airkit-worktree: .*add-worktree/);
+    assert.equal(g('status', '--porcelain').stdout.trimEnd(), ' M f');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('--check reports fetch-mirror-then-add-worktree when the home clone lacks the branch', () => {
   const root = fakeRepo();
-  const home = join(root, 'AirKit');
-  mkdirSync(home);
-  const g = (...a: string[]) => spawnSync('git', ['-C', home, ...a], { encoding: 'utf8' });
-  g('init', '-q', '-b', 'AirConcert');
-  writeFileSync(join(home, 'f'), '1'); g('add', 'f'); g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'base');
-  const { out } = run({ COS_REPO_ROOT: root, COS_AIRKIT_HOME: home, COS_SC_APP: join(root, 'nope.app'), COS_SC_EXTENSIONS: root });
-  assert.match(out, /airkit-worktree: .*fetch-mirror-then-add-worktree/);
+  try {
+    const home = join(root, 'AirKit');
+    mkdirSync(home);
+    const g = (...a: string[]) => spawnSync('git', ['-C', home, ...a], { encoding: 'utf8' });
+    g('init', '-q', '-b', 'AirConcert');
+    writeFileSync(join(home, 'f'), '1'); g('add', 'f'); g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'base');
+    const { out } = run({ COS_REPO_ROOT: root, COS_AIRKIT_HOME: home, COS_SC_APP: join(root, 'nope.app'), COS_SC_EXTENSIONS: root });
+    assert.match(out, /airkit-worktree: .*fetch-mirror-then-add-worktree/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('--check on the real repo reports airkit-worktree ok and the lock sha, and is idempotent', () => {
@@ -68,11 +81,15 @@ test('--check on the real repo reports airkit-worktree ok and the lock sha, and 
 
 test('--check warns (not fails) on lock drift', () => {
   const root = fakeRepo();
-  const wt = join(root, 'airkit');
-  mkdirSync(wt);
-  const g = (...a: string[]) => spawnSync('git', ['-C', wt, ...a], { encoding: 'utf8' });
-  g('init', '-q', '-b', 'AirConditions');
-  writeFileSync(join(wt, 'f'), '1'); g('add', 'f'); g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'x');
-  const { out } = run({ COS_REPO_ROOT: root, COS_AIRKIT_HOME: join(root, 'no-airkit'), COS_SC_APP: join(root, 'nope.app'), COS_SC_EXTENSIONS: root });
-  assert.match(out, /\[ok\] airkit-lock: drift .*update with: git -C airkit rev-parse HEAD/);
+  try {
+    const wt = join(root, 'airkit');
+    mkdirSync(wt);
+    const g = (...a: string[]) => spawnSync('git', ['-C', wt, ...a], { encoding: 'utf8' });
+    g('init', '-q', '-b', 'AirConditions');
+    writeFileSync(join(wt, 'f'), '1'); g('add', 'f'); g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'x');
+    const { out } = run({ COS_REPO_ROOT: root, COS_AIRKIT_HOME: join(root, 'no-airkit'), COS_SC_APP: join(root, 'nope.app'), COS_SC_EXTENSIONS: root });
+    assert.match(out, /\[ok\] airkit-lock: drift .*update with: git -C airkit rev-parse HEAD/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

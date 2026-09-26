@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // Prepare a Mac for Conditions of Stillness. `--check` reports only. See spec §9.
-import { existsSync, readFileSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { parseLock, versionAtLeast, decideAirkitAction, lockStatus, renderReport, type Check, type Lock } from './lib/env.ts';
-import { stripAppleDouble, pluginsPresent } from './lib/sc3plugins.ts';
+import { pluginsPresent, installSc3Plugins } from './lib/sc3plugins.ts';
 
 const SC_MIN = '3.13.0';
 const NODE_MIN = '22.18.0';
@@ -85,21 +85,14 @@ if (pluginsPresent(SC_EXT)) {
 } else {
   checks.push({ name: 'sc3-plugins', ok: false, detail: 'not installed', fix: `./setup.sh installs 3.14.0 into ${SC_EXT}` });
   fixes.push({ name: 'install sc3-plugins 3.14.0', run: () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'sc3-'));
-    const zip = join(tmp, 'sc3.zip');
-    const dl = sh('curl', ['-fsSL', '-o', zip, PLUGINS_URL]);
-    if (!dl.ok) throw new Error(`download failed: ${dl.out}`);
-    const un = sh('unzip', ['-q', zip, '-d', tmp]);
-    if (!un.ok) throw new Error(`unzip failed: ${un.out}`);
-    // The zip unpacks to a single folder containing SC3plugins/; find it.
-    const found = sh('find', [tmp, '-maxdepth', '3', '-type', 'd', '-name', 'SC3plugins']).out.split('\n')[0];
-    if (!found) throw new Error('SC3plugins folder not found in the archive');
-    mkdirSync(SC_EXT, { recursive: true });
-    const mv = sh('mv', [found, join(SC_EXT, 'SC3plugins')]);
-    if (!mv.ok) throw new Error(`move failed: ${mv.out}`);
-    const removed = stripAppleDouble(join(SC_EXT, 'SC3plugins'));
-    console.log(`  installed SC3plugins; removed ${removed.length} AppleDouble file(s). Recompile the class library (Cmd-Shift-L) in any open SuperCollider.`);
-    rmSync(tmp, { recursive: true, force: true });
+    installSc3Plugins({
+      extensionsDir: SC_EXT,
+      fetchArchive: (zip) => {
+        const dl = sh('curl', ['-fsSL', '-o', zip, PLUGINS_URL]);
+        if (!dl.ok) throw new Error(`download failed: ${dl.out}`);
+      },
+      log: console.log,
+    });
   } });
 }
 
