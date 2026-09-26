@@ -20,3 +20,4 @@
 - Spec: `../../docs/superpowers/specs/2026-09-26-conditions-of-stillness-architecture-design.md`
 - PatchMarks plugin: `../../docs/superpowers/specs/2026-09-15-patch-marks-plugin-design.md`
 - Parking lot: `../_parking-lot.md`
+- 2026-09-26 — Page design locked after mockup feedback: cockpit style, colour = status only, "SCENE D" dominant, real stick names, status strip. Mockup: https://claude.ai/artifact/DdTVyHA4x2BFFuGCGrxYT1

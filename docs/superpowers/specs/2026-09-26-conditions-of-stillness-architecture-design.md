@@ -254,6 +254,18 @@ re-read on change (chokidar-free: `fs.watch` with a 200 ms debounce).
   the Perform view.
 - Admin actions are guarded against accidental taps (confirm on jump and panic).
 
+**Locked visual design (2026-09-26, mockup https://claude.ai/artifact/DdTVyHA4x2BFFuGCGrxYT1):**
+cockpit, not craft. Black ground, white text, plain heavy sans (IBM Plex Sans) and mono
+(IBM Plex Mono); no serif, no decorative accent. Colour carries meaning only: green = ok,
+amber = changing or warning, red = fault, grey = inert. Perform: a status strip of solid
+cells across the top (PEDAL, STICKS n/4, AIRKIT, AUDIO, BATTERY, clock); "SCENE D" with
+the letter as the dominant element and the name beside it; NEXT and PREVIOUS as labelled
+boxes; sticks shown by their real hardware names from `cast.yaml` (performer and hand in
+small text), each with patch name, a state tag (OK / FADING nn% / SILENT / NO SIGNAL) and
+battery; buttons read "BACK TO C" and "NEXT: SCENE E". Admin: same status strip, scene list
+with NOW/NEXT tags, stick strips by real name with meter and level, slots and engine
+panels, master, red PANIC.
+
 ### Tests (`runner/test/`, `node --test`)
 Scene file validation; the transition state machine including press-mid-fade, back at scene A,
 next at the last scene, two-hand assignment freeing the right wrist; OSC forwarding and slot
