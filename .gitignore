@@ -1,0 +1,26 @@
+.DS_Store
+.superpowers/
+AirStickCore-BLE-main/
+# AirKit worktree on branch AirConditions (owned by ~/AirKit's git)
+airkit/
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+# runner runtime state and logs
+runner/state/
+*.log
+# audio: samples are downloaded per SHOPPING.md; manifests and sources are committed
+samples/**/*.wav
+samples/**/*.aif
+samples/**/*.aiff
+samples/**/*.mp3
+samples/**/*.flac
+samples/**/*.ogg
+samples/**/wav/
+# recorded wrist takes (INDEX.md is committed)
+takes/*.take.jsonl
+# raw mined corpus (index.json, INDEX.md, digest.md are committed)
+patching/corpus/*/
+# atomic-write temporaries
+*.tmp

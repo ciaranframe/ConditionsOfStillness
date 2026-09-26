@@ -1,0 +1,200 @@
+{
+	Initialize "() {
+AddToPluginsMenu('Add Patch Mark', 'AddPatchMark');
+AddToPluginsMenu('Renumber Patch Marks', 'RenumberPatchMarks');
+}"
+	_PluginName "Patch Marks"
+	_Version "1.0.0"
+	_Prefix ">PATCH>"
+	_StyleName "Patch Mark"
+	_FallbackStyleId "text.staff.boxed"
+	_KeyScale "1000000"
+	_MsgNoScore "No score is open."
+	_MsgNoSelection "Select a note, rest or bar on the staff that should carry the patch mark, then run Add Patch Mark again."
+	_MsgSystemStaff "Patch marks are staff text and cannot go on the system staff. Select something on a normal staff."
+	_MsgExists "There is already a patch mark at that position. The marks on this staff have been renumbered instead."
+	_MsgRenumbered "Renumbered patch marks on this staff: "
+	_MsgNone "No patch marks found on the selected staff."
+	AddPatchMark "() {
+// Adds a boxed '>PATCH>' + letter staff text at the selection, then renumbers
+// every patch mark on that staff so letters run A, B, C ... in score order.
+score = GetScore();
+if (not IsObject(score)) {
+	return False;
+}
+target = GetTarget(score);
+if (target.Length = 0) {
+	return False;
+}
+staff = target[0];
+bar = target[1];
+pos = target[2];
+existing = FindPatchMarkAt(bar, pos);
+if (IsObject(existing)) {
+	score.Redraw = False;
+	RenumberStaff(staff);
+	score.Redraw = True;
+	Sibelius.MessageBox(_MsgExists);
+	return True;
+}
+score.Redraw = False;
+bar.AddText(pos, _Prefix & '\\n\\' & 'A', GetStyleId());
+RenumberStaff(staff);
+score.Redraw = True;
+return True;
+}"
+	RenumberPatchMarks "() {
+// Re-letters all patch marks on the selected staff in score order.
+score = GetScore();
+if (not IsObject(score)) {
+	return False;
+}
+target = GetTarget(score);
+if (target.Length = 0) {
+	return False;
+}
+staff = target[0];
+score.Redraw = False;
+count = RenumberStaff(staff);
+score.Redraw = True;
+if (count = 0) {
+	Sibelius.MessageBox(_MsgNone);
+} else {
+	Sibelius.MessageBox(_MsgRenumbered & count);
+}
+return True;
+}"
+	GetScore "() {
+// Returns the active score, or False (with a message) if none is open.
+if (Sibelius.ScoreCount = 0) {
+	Sibelius.MessageBox(_MsgNoScore);
+	return False;
+}
+return Sibelius.ActiveScore;
+}"
+	GetTarget "(score) {
+// Works out where a mark should go from the current selection.
+// Returns a sparse array [staff, bar, position], or an empty array after showing a message.
+sel = score.Selection;
+empty = CreateSparseArray();
+if (sel.IsPassage) {
+	if (sel.IsSystemPassage) {
+		Sibelius.MessageBox(_MsgSystemStaff);
+		return empty;
+	}
+	staff = score.NthStaff(sel.TopStaff);
+	if (staff.IsSystemStaff) {
+		Sibelius.MessageBox(_MsgSystemStaff);
+		return empty;
+	}
+	bar = staff.NthBar(sel.FirstBarNumber);
+	result = CreateSparseArray();
+	result.Push(staff, bar, sel.FirstBarSr);
+	return result;
+}
+// Non-passage selection (one or more clicked objects): use the earliest one.
+bestObj = False;
+bestKey = -1;
+sawSystemObject = False;
+for each obj in sel {
+	if (IsObject(obj)) {
+		objBar = obj.ParentBar;
+		objStaff = objBar.ParentStaff;
+		if (objStaff.IsSystemStaff) {
+			sawSystemObject = True;
+		} else {
+			key = (objBar.BarNumber * (0 + _KeyScale)) + obj.Position;
+			if ((bestKey < 0) or (key < bestKey)) {
+				bestKey = key;
+				bestObj = obj;
+			}
+		}
+	}
+}
+if (not IsObject(bestObj)) {
+	if (sawSystemObject) {
+		Sibelius.MessageBox(_MsgSystemStaff);
+	} else {
+		Sibelius.MessageBox(_MsgNoSelection);
+	}
+	return empty;
+}
+bar = bestObj.ParentBar;
+result = CreateSparseArray();
+result.Push(bar.ParentStaff, bar, bestObj.Position);
+return result;
+}"
+	FindPatchMarkAt "(bar, pos) {
+// Returns the patch mark Text at exactly this bar and position, or False.
+for each Text t in bar {
+	if (t.Position = pos) {
+		if (IsPatchMark(t)) {
+			return t;
+		}
+	}
+}
+return False;
+}"
+	IsPatchMark "(t) {
+// A patch mark is any staff text whose text starts with the prefix.
+return (Substring(t.Text, 0, Length(_Prefix)) = _Prefix);
+}"
+	GetStyleId "() {
+// Prefer a user-defined 'Patch Mark' text style; fall back to built-in Boxed text.
+id = Sibelius.FindStyleId(_StyleName);
+if (id = '') {
+	id = _FallbackStyleId;
+}
+return id;
+}"
+	RenumberStaff "(staff) {
+// Collects every patch mark on the staff, sorts by (bar, position), rewrites
+// the letters. Returns the number of marks renumbered.
+keys = CreateSparseArray();
+marks = CreateSparseArray();
+barCount = staff.BarCount;
+for i = 1 to barCount + 1 {
+	bar = staff.NthBar(i);
+	for each Text t in bar {
+		if (IsPatchMark(t)) {
+			keys.Push((i * (0 + _KeyScale)) + t.Position);
+			marks.Push(t);
+		}
+	}
+}
+// Insertion sort on keys, moving marks in step (for-each order within a bar is not guaranteed).
+n = keys.Length;
+for i = 1 to n {
+	j = i;
+	while (j > 0) {
+		if (keys[j - 1] > keys[j]) {
+			tmpKey = keys[j - 1];
+			keys[j - 1] = keys[j];
+			keys[j] = tmpKey;
+			tmpMark = marks[j - 1];
+			marks[j - 1] = marks[j];
+			marks[j] = tmpMark;
+			j = j - 1;
+		} else {
+			j = 0;
+		}
+	}
+}
+for i = 0 to n {
+	mark = marks[i];
+	mark.Text = _Prefix & '\\n\\' & PatchLetter(i + 1);
+}
+return n;
+}"
+	PatchLetter "(n) {
+// 1 -> A, 26 -> Z, 27 -> AA, 53 -> AAA: same sequence as Sibelius rehearsal marks.
+cycle = RoundDown((n - 1) / 26);
+idx = (n - 1) - (26 * cycle);
+letter = Chr(65 + idx);
+result = '';
+for i = 0 to cycle + 1 {
+	result = result & letter;
+}
+return result;
+}"
+}
