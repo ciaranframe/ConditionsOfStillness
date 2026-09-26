@@ -7,6 +7,7 @@
 | Version | Date | Summary |
 |---|---|---|
 | [v1](conditions-of-stillness-v1.md) | 2026-09-26 | First session. Context survey of AirKit, COTF Patch Lab and Glimmer; five rounds of questions; approaches chosen on three axes; sectioned design approved; umbrella spec written. |
+| [v2](conditions-of-stillness-v2.md) | 2026-09-26 | Execution: foundation and engine profile built, reviewed, merged; page design locked from a mockup; repos on GitHub. |
 
 ## Major decisions (all versions)
 - 2026-09-26 — Free time, no conductor; scenes file is the only structure; no score link.
