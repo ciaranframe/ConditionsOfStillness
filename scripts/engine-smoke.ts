@@ -94,8 +94,7 @@ async function main() {
     send('/airkit/loadPersonality', [9001, 1]);
     for (let i = 0; i < 25; i++) { await sleep(200); s = await seats(); if (s[9007] === 'COS_Template' && s[9001] === 'COS_Template') break; }
     check(s[9007] === 'COS_Template' && s[9001] === 'COS_Template', 'COS_Template loaded on slots 1 and 7');
-    await sleep(500);
-    st = await status();
+    for (let i = 0; i < 25; i++) { await sleep(200); st = await status(); if (st?.slots?.[0]?.ready === true) break; }
     check(st?.slots?.[0]?.ready === true, 'slot 1 ready:true right after the first load completes (Review Focus E3)');
     check(/\[COS_Template\] slot 7 register low partner 5/.test(log()), 'slot 7 read params and partner sent before it existed (Review Focus 1)');
     check(/\[COS_Template\] slot 1 register mid partner none/.test(log()), 'slot 1 defaults with no params');
@@ -155,6 +154,29 @@ async function main() {
     send('/airkit/loadPersonality', [9002, 0]);
     for (let i = 0; i < 25; i++) { await sleep(200); s = await seats(); if (s[9002] === 'silence') break; }
     check(s[9002] === 'silence', 'slot 2 back to silence after the crossfade direction check');
+
+    // 7c. rapid same-slot reload: two loads land back-to-back on the same port (silence, then
+    // immediately the template) — exactly what the runner does when it frees a slot and
+    // preloads the next patch into it. The previous load's init Routine can still be suspended
+    // at s.sync when the next load lands, so ready must never read true for a stale/mismatched
+    // env (Review Focus: ready race, fixed via d.initEnv === d.env identity, not timestamps).
+    send('/airkit/loadPersonality', [9002, 0]);
+    send('/airkit/loadPersonality', [9002, 1]);
+    let raceNeverStale = true;
+    let raceEndedReady = false;
+    for (let i = 0; i < 25; i++) {
+      await sleep(200);
+      st = await status();
+      const slot2 = st?.slots?.[1];
+      if (slot2?.ready === true && slot2?.name !== 'COS_Template') raceNeverStale = false;
+      if (slot2?.ready === true && slot2?.name === 'COS_Template') { raceEndedReady = true; break; }
+    }
+    check(raceNeverStale, 'slot 2 never reports ready:true with a stale name during the rapid reload');
+    check(raceEndedReady, 'slot 2 ends ready:true on COS_Template after the rapid reload');
+    check(/\[COS_Template\] slot 2 /.test(log()), 'slot 2 template init log line appears after the rapid reload');
+    send('/airkit/loadPersonality', [9002, 0]);
+    for (let i = 0; i < 25; i++) { await sleep(200); s = await seats(); if (s[9002] === 'silence') break; }
+    check(s[9002] === 'silence', 'slot 2 back to silence after the rapid-reload check');
 
     // 8. panic (Review Focus 5)
     send('/airkit/cos/panic');
