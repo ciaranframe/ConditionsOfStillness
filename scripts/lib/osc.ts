@@ -1,6 +1,9 @@
 // OSC 1.0 codec. Copied from the Glimmer show engine (code/show-engine/src/osc/codec.ts,
 // Ciaran Frame, 2026) so this repo has no dependency on the Glimmer checkout. Keep in sync by hand.
 
+// Minimal OSC 1.0 codec: messages and bundles, argument types i f s b d h T F N I t.
+// Written in-house to avoid a dependency chain; covered by tests.
+
 export type OscArg = number | string | boolean | null | Uint8Array | bigint;
 
 export interface OscMessage {
