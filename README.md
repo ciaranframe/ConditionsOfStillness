@@ -27,6 +27,8 @@ npm test
 Prerequisites installed by hand: SuperCollider ≥ 3.13 (`/Applications/SuperCollider.app`),
 Node ≥ 22.18, Homebrew `ffmpeg`. `setup.sh` installs sc3-plugins 3.14.0, prepares the AirKit
 worktree (from `~/AirKit` when present, else from the private mirror), and installs Node deps.
+Until the private mirror holds the branch, a second Mac must get `~/AirKit` by copying it from
+this one; `./setup.sh --check` reports whether the mirror is reachable.
 
 ## Working on the AirKit branch
 - Work in `airkit/` (branch `AirConditions`); `~/AirKit` stays on `AirConcert`, untouched.

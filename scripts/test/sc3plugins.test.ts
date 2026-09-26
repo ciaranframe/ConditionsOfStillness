@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, rmSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { stripAppleDouble, pluginsPresent, installSc3Plugins } from '../lib/sc3plugins.ts';
 
@@ -108,6 +108,10 @@ test('installSc3Plugins moves a stale SC3plugins aside instead of deleting it', 
     assert.equal(existsSync(result.movedAside as string), true);
     assert.equal(existsSync(join(result.movedAside as string, 'OldStuff', 'Old.sc')), true);
     assert.equal(existsSync(join(extensionsDir, 'SC3plugins', 'BhobUGens', 'BMoog.sc')), true);
+    // Outside extensionsDir (which SuperCollider scans), inside its parent — never a second,
+    // possibly-broken copy sitting where the real install is expected.
+    assert.equal(dirname(result.movedAside as string), dirname(extensionsDir));
+    assert.equal((result.movedAside as string).startsWith(extensionsDir + '/'), false);
   } finally {
     rmSync(work, { recursive: true, force: true });
     rmSync(extensionsDir, { recursive: true, force: true });

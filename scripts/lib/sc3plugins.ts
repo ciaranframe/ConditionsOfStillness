@@ -1,5 +1,5 @@
 import { readdirSync, rmSync, statSync, existsSync, mkdtempSync, mkdirSync, renameSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { isAppleDouble } from './env.ts';
@@ -50,9 +50,11 @@ export type InstallSc3PluginsResult = {
  * Install sc3-plugins atomically. The clean SC3plugins folder is built entirely in a temp
  * directory (unzip, then stripAppleDouble on the extracted copy) before anything under
  * `extensionsDir` is touched. Any pre-existing `<extensionsDir>/SC3plugins` is renamed aside
- * (never deleted) so a crash mid-install never destroys a working install, and the clean
- * folder is renamed into place as the last step. The temp directory is always removed, even
- * on failure.
+ * to a sibling of `extensionsDir` (never deleted, and never left inside `extensionsDir`, which
+ * SuperCollider scans) so a crash mid-install never destroys a working install and the moved-
+ * aside copy is never picked up as a second, broken install. If the final rename into place
+ * fails, the moved-aside folder is renamed back before rethrowing, so a failed install leaves
+ * the previous one exactly as it was. The temp directory is always removed, even on failure.
  */
 export function installSc3Plugins(opts: InstallSc3PluginsOptions): InstallSc3PluginsResult {
   const log = opts.log ?? (() => {});
@@ -75,7 +77,9 @@ export function installSc3Plugins(opts: InstallSc3PluginsOptions): InstallSc3Plu
     const dest = join(opts.extensionsDir, 'SC3plugins');
     let movedAside: string | null = null;
     if (existsSync(dest)) {
-      movedAside = `${dest}.replaced-${new Date().toISOString().replace(/:/g, '-')}`;
+      // Beside extensionsDir, not inside it — SuperCollider only scans inside extensionsDir,
+      // so the old install can't be mistaken for a second (broken) copy.
+      movedAside = join(dirname(opts.extensionsDir), `SC3plugins.replaced-${new Date().toISOString().replace(/:/g, '-')}`);
       renameSync(dest, movedAside);
     }
     try {
@@ -83,8 +87,12 @@ export function installSc3Plugins(opts: InstallSc3PluginsOptions): InstallSc3Plu
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === 'EXDEV') {
         const mv = sh('mv', [found, dest]);
-        if (!mv.ok) throw new Error(`move failed: ${mv.out}`);
+        if (!mv.ok) {
+          if (movedAside) { try { renameSync(movedAside, dest); } catch { /* best effort: leave both in place for the operator */ } }
+          throw new Error(`move failed: ${mv.out}`);
+        }
       } else {
+        if (movedAside) { try { renameSync(movedAside, dest); } catch { /* best effort: leave both in place for the operator */ } }
         throw e;
       }
     }
