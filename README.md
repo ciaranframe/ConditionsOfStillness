@@ -45,4 +45,11 @@ this one; `./setup.sh --check` reports whether the mirror is reachable.
 - The iPad for the Admin page joins the same network; the runner prints the URLs.
 
 ## Running
-`./run.sh` arrives with sub-project 2 (engine profile). Until then, nothing here makes sound.
+- `./run.sh` — starts the engine (AirKit profile `airkit/code3.0/conditions/main_conditions.scd`)
+  under a restart loop; log at `~/.conditions/airkit.log`; Ctrl-C stops sclang and scsynth.
+  `COS_OUT_DEVICE="MacBook Pro Speakers" ./run.sh` pins the output device. The runner and the
+  Perform/Admin pages arrive with sub-project 3.
+- `node scripts/engine-ping.ts` — prints roster, seats, state and `[COS]` status of a running engine.
+- `npm run smoke` — boots a private engine on ports 57130/57131, drives it with fake sticks and
+  checks the `[COS]` contract end to end (audible for ~10 s). Safe while a real engine runs.
+- OSC contract: `airkit/code3.0/API.md`, the `[COS]` sections.

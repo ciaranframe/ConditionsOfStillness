@@ -278,7 +278,7 @@ mapping; reconciliation on runner restart and on AirKit dead→alive; pedal mapp
 Generic. Reads the **piece profile** named in its invocation (default: `patching/profile.md` of
 the current repo). Steps in `SKILL.md`: read profile + `patching/context/` → read the brief like a
 composer → six-track research (parallel subagents) → design and write the note → write the patch
-atomically from the profile's `TEMPLATE.sc` → compile-check → lint → roster → audition → samples
+atomically from the profile's `TEMPLATE.sc` (the runnable skeleton is `airkit/personalities/COS_Template.sc`, built with the engine; the profile points at it rather than keeping a copy) → compile-check → lint → roster → audition → samples
 step if the header declares slots → hand-off → iterate on notes.
 
 References: `engine.md` (contract, lifecycle, hooks, gesture model — consolidated from COTF's
