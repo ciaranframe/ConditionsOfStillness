@@ -81,17 +81,26 @@ export function parseScenes(text: string, roster: string[] | null): { file: Scen
     if (fade < FADE_MIN || fade > FADE_MAX) { errors.push(`${tag}: fade ${fade} must be between ${FADE_MIN} and ${FADE_MAX} s`); fade = Math.min(FADE_MAX, Math.max(FADE_MIN, fade)); }
     const sounds: Record<Wrist, Sound> = { ...prev };
     const mentions: Wrist[] = [];
+    const writtenBy: Partial<Record<Wrist, string>> = {};
     const rawSounds = isRecord(raw.sounds) ? raw.sounds : {};
     for (const [key, val] of Object.entries(rawSounds)) {
       const where = `${tag}: ${key}`;
       if ((WRISTS as readonly string[]).includes(key)) {
         const s = readSound(where, val); if (!s) continue;
         if (isTwoHand(s.patch)) errors.push(`${where}: 2H patch ${s.patch} must be on Z or C`);
-        sounds[key as Wrist] = s; mentions.push(key as Wrist);
+        const w = key as Wrist;
+        if (writtenBy[w]) { errors.push(`${tag}: ${w} is assigned twice (${writtenBy[w]} and ${key})`); continue; }
+        writtenBy[w] = key;
+        sounds[w] = s; mentions.push(w);
       } else if ((PERFORMERS as readonly string[]).includes(key)) {
         const s = readSound(where, val); if (!s) continue;
         if (!isTwoHand(s.patch)) errors.push(`${where}: ${s.patch} is not a 2H patch (Z and C take two-hand sounds only)`);
         const l = leftOf(key as Performer), r = rightOf(key as Performer);
+        let conflict = false;
+        if (writtenBy[l]) { errors.push(`${tag}: ${l} is assigned twice (${writtenBy[l]} and ${key})`); conflict = true; }
+        if (writtenBy[r]) { errors.push(`${tag}: ${r} is assigned twice (${writtenBy[r]} and ${key})`); conflict = true; }
+        if (conflict) continue;
+        writtenBy[l] = key; writtenBy[r] = key;
         sounds[l] = { ...s, partner: r }; sounds[r] = SILENCE; mentions.push(l, r);
       } else errors.push(`${where}: unknown key (use ZL ZR CL CR or Z C)`);
     }

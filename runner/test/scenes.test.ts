@@ -71,6 +71,13 @@ scenes:
   assert.match(text, /CL: param bad must be a string or number/);
 });
 
+test('a wrist assigned by both a performer key and its own key is an error', () => {
+  const { file, errors } = parseScenes(`piece: T\nscenes:\n  - { id: A, name: x, sounds: { Z: COS_Membrane2H, ZR: COS_Breath } }\n  - { id: B, name: y, sounds: { CL: COS_Skin, C: COS_Membrane2H } }\n`, ROSTER);
+  assert.equal(file, null);
+  assert.match(errors.join('\n'), /A: ZR is assigned twice \(Z and ZR\)/);
+  assert.match(errors.join('\n'), /B: CL is assigned twice \(CL and C\)/);
+});
+
 test('without a roster, patch names are not checked', () => {
   const { file, errors } = parseScenes(base, null);
   assert.deepEqual(errors, []);
