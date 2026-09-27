@@ -44,29 +44,48 @@ export class PedalMapper {
   }
 }
 
-interface MidiInputLike { getPortCount(): number; getPortName(i: number): string; openPort(i: number): void; closePort(): void; ignoreTypes(a: boolean, b: boolean, c: boolean): void; on(ev: 'message', cb: (dt: number, msg: number[]) => void): void }
+export interface MidiInputLike { getPortCount(): number; getPortName(i: number): string; openPort(i: number): void; closePort(): void; ignoreTypes(a: boolean, b: boolean, c: boolean): void; on(ev: 'message', cb: (dt: number, msg: number[]) => void): void }
 
-export async function startPedal(opts: { cast: () => Cast; onCue: (a: PedalAction) => void; log: (m: string) => void; clock?: () => number; rescanMs?: number }): Promise<{ status(): PedalStatus; close(): void }> {
+const SCAN_ERROR_LOG_MS = 30_000;
+
+export async function startPedal(opts: { cast: () => Cast; onCue: (a: PedalAction) => void; log: (m: string) => void; clock?: () => number; rescanMs?: number; midi?: { Input: new () => MidiInputLike } }): Promise<{ status(): PedalStatus; close(): void }> {
   const mapper = new PedalMapper(opts);
+  const clock = opts.clock ?? monotonicMs;
   let Input: (new () => MidiInputLike) | null = null;
-  try { Input = ((await import('@julusian/midi')) as unknown as { Input: new () => MidiInputLike }).Input; }
-  catch (e) { opts.log(`[pedal] MIDI unavailable (${e instanceof Error ? e.message.split('\n')[0] : String(e)})`); }
+  if (opts.midi) Input = opts.midi.Input;
+  else {
+    try { Input = ((await import('@julusian/midi')) as unknown as { Input: new () => MidiInputLike }).Input; }
+    catch (e) { opts.log(`[pedal] MIDI unavailable (${e instanceof Error ? e.message.split('\n')[0] : String(e)})`); }
+  }
   let input: MidiInputLike | null = null; let portName: string | null = null; let timer: ReturnType<typeof setInterval> | null = null;
+  let lastScanErrorAt = -Infinity;
+  // The native binding can throw at any of these calls (unplug mid-call, a flaky adapter's driver, …);
+  // the pedal is optional, so a scan failure must never take the whole runner down with it.
   const scan = () => {
     if (!Input) return;
-    const probe = new Input(); const names = Array.from({ length: probe.getPortCount() }, (_, i) => probe.getPortName(i)); probe.closePort();
-    if (input) { if (!names.includes(portName!)) { opts.log(`[pedal] "${portName}" disappeared`); input.closePort(); input = null; portName = null; } return; }
-    const want = opts.cast().pedal.input?.toLowerCase() ?? null;
-    const idx = want ? names.findIndex((n) => n.toLowerCase().includes(want)) : names.length ? 0 : -1;
-    if (idx < 0) return;
-    input = new Input(); input.ignoreTypes(true, true, true);
-    input.on('message', (_dt, msg) => { const d = mapper.feed(msg); if (d) opts.log(`[pedal] ${d}`); });
-    input.openPort(idx); portName = names[idx]!; opts.log(`[pedal] listening on "${portName}"`);
+    try {
+      const probe = new Input(); const names = Array.from({ length: probe.getPortCount() }, (_, i) => probe.getPortName(i)); probe.closePort();
+      if (input) { if (!names.includes(portName!)) { opts.log(`[pedal] "${portName}" disappeared`); input.closePort(); input = null; portName = null; } return; }
+      const want = opts.cast().pedal.input?.toLowerCase() ?? null;
+      const idx = want ? names.findIndex((n) => n.toLowerCase().includes(want)) : names.length ? 0 : -1;
+      if (idx < 0) return;
+      input = new Input(); input.ignoreTypes(true, true, true);
+      input.on('message', (_dt, msg) => { const d = mapper.feed(msg); if (d) opts.log(`[pedal] ${d}`); });
+      input.openPort(idx); portName = names[idx]!; opts.log(`[pedal] listening on "${portName}"`);
+    } catch (e) {
+      const now = clock();
+      if (now - lastScanErrorAt >= SCAN_ERROR_LOG_MS) {
+        opts.log(`[pedal] scan failed: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}`);
+        lastScanErrorAt = now;
+      }
+      if (input) { try { input.closePort(); } catch { /* already gone */ } }
+      input = null; portName = null;
+    }
   };
   scan();
   if (Input) { timer = setInterval(scan, opts.rescanMs ?? 5000); timer.unref(); }
   return {
     status: (): PedalStatus => ({ state: !Input ? 'NO MIDI' : input ? 'OK' : 'NO PEDAL', port: portName, lastEvent: mapper.lastEvent }),
-    close: () => { if (timer) clearInterval(timer); input?.closePort(); },
+    close: () => { if (timer) clearInterval(timer); try { input?.closePort(); } catch { /* already gone */ } },
   };
 }
