@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, wr
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { extractCommentHeader, NAME_RE, parseRoster, renderRoster, rosterAdd, rosterList, rosterRemove } from '../src/roster.ts';
+import { extractCommentHeader, missingPersonality, NAME_RE, parseRoster, renderRoster, rosterAdd, rosterList, rosterRemove } from '../src/roster.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = join(HERE, '..', 'patch-roster.ts');
@@ -30,6 +30,8 @@ function tempRepo(rosterText: string = ORIGINAL_TEXT): string {
   writeFileSync(join(root, 'airkit.lock'), 'branch=AirConditions\nsha=abc\nupstream=u\nmirror=m\n');
   mkdirSync(join(root, 'airkit', 'lists'), { recursive: true });
   writeFileSync(join(root, 'airkit', 'lists', 'list_conditions.sc'), rosterText);
+  mkdirSync(join(root, 'airkit', 'personalities'), { recursive: true });
+  for (const n of ['COS_Template', 'COS_Foo']) writeFileSync(join(root, 'airkit', 'personalities', `${n}.sc`), '// patch\n');
   return root;
 }
 
@@ -261,6 +263,24 @@ test('CLI: remove on an absent name says so and does not rewrite the file, exit 
     const after = statSync(path);
     assert.equal(after.ino, before.ino);
     assert.equal(after.mtimeMs, before.mtimeMs);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI: add refuses a name with no airkit/personalities/<Name>.sc (exit 1, path named, roster untouched)', () => {
+  const root = tempRepo();
+  const path = join(root, 'airkit', 'lists', 'list_conditions.sc');
+  try {
+    const before = readFileSync(path, 'utf8');
+    const r = runCli(root, ['add', 'COS_Ghost']);
+    assert.equal(r.code, 1);
+    assert.ok(r.err.includes(join(root, 'airkit', 'personalities', 'COS_Ghost.sc')), r.err);
+    assert.equal(readFileSync(path, 'utf8'), before);
+    withRepoRoot(root, () => {
+      assert.equal(missingPersonality('COS_Ghost'), join(root, 'airkit', 'personalities', 'COS_Ghost.sc'));
+      assert.equal(missingPersonality('COS_Foo'), null);
+    });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

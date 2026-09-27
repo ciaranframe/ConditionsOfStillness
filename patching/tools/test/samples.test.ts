@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   ConvertError,
+  MissingToolError,
   assignFiles,
   checkSamples,
   convert,
@@ -20,6 +21,7 @@ import {
   parseLength,
   parseShopping,
   probe,
+  readExistingManifest,
   writeManifest,
   writeSourcesSkeleton,
   type Slot,
@@ -525,4 +527,53 @@ test('CLI: a clean fixture exits 0', (t) => {
 
   const r = runCli(root, 'COS_Clean');
   assert.equal(r.code, 0);
+});
+
+// --- manifest shape and missing tools (no ffmpeg dependency) --------------------------------
+
+test('readExistingManifest: an array is empty; only plain-object entries with a string file are kept', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'cos-manifest-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, 'manifest.json');
+  writeFileSync(path, JSON.stringify([{ file: 'wav/hit.wav' }]));
+  assert.deepEqual(readExistingManifest(path), {});
+  const good = { file: 'wav/hit.wav', frames: 48000, channels: 1, sr: 48000, source: 'hit-a.wav', seconds: 1 };
+  writeFileSync(path, JSON.stringify({ hit: good, bed: [1, 2], pad: null, rim: 'wav/rim.wav', gong: { file: 7 }, bell: { frames: 1 } }));
+  assert.deepEqual(readExistingManifest(path), { hit: good });
+  writeFileSync(path, 'null');
+  assert.deepEqual(readExistingManifest(path), {});
+  assert.deepEqual(readExistingManifest(join(dir, 'absent.json')), {});
+});
+
+test('checkSamples: a missing ffprobe throws MissingToolError and writes nothing', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'cos-samples-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const dir = join(root, 'COS_NoTools');
+  writeShopping(dir, SHOPPING_FIXTURE);
+  writeFileSync(join(dir, 'hit-a.wav'), randomBytes(64));
+  assert.throws(() => checkSamples(dir, { ffprobeBin: join(root, 'no-ffprobe') }), (e: unknown) => e instanceof MissingToolError && /brew install ffmpeg/.test(e.message));
+  assert.equal(existsSync(join(dir, 'manifest.json')), false);
+});
+
+test('checkSamples: a missing ffmpeg throws MissingToolError instead of a per-slot conversion failure', (t) => {
+  if (!hasFfmpeg()) { t.skip('ffmpeg/ffprobe not on PATH'); return; }
+  const root = mkdtempSync(join(tmpdir(), 'cos-samples-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const dir = join(root, 'COS_NoFfmpeg');
+  writeShopping(dir, SHOPPING_FIXTURE);
+  sine(join(dir, 'hit-crash.wav'), 440, 0.4, 2);
+  assert.throws(() => checkSamples(dir, { ffmpegBin: join(root, 'no-ffmpeg') }), MissingToolError);
+  assert.deepEqual(findTmpFiles(dir), []);
+});
+
+test('CLI: ffmpeg/ffprobe not on PATH exits 2 with the install hint', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'cos-samples-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const dir = join(root, 'COS_NoPath');
+  writeShopping(dir, SHOPPING_FIXTURE);
+  writeFileSync(join(dir, 'hit-a.wav'), randomBytes(64));
+  const r = spawnSync(process.execPath, [CLI, 'COS_NoPath', '--dir', root], { encoding: 'utf8', env: { ...process.env, PATH: join(root, 'empty-bin') } });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /install ffmpeg \(brew install ffmpeg\)/);
+  assert.doesNotMatch(r.stdout, /unreadable/);
 });

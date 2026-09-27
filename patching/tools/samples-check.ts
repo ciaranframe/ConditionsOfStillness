@@ -5,10 +5,11 @@
 // Usage: node patching/tools/samples-check.ts COS_<Name> [--dir samples/]
 // Exit 0 every slot converted (warnings allowed), 1 any slot missing/unreadable/failed-to-
 // convert or an audio file matches no slot (Review Focus 5), 2 usage, no SHOPPING.md, or a
-// malformed SHOPPING.md/SOURCES.md (a usage-class error — checkSamples throws for those).
+// malformed SHOPPING.md/SOURCES.md (a usage-class error — checkSamples throws for those), or
+// ffmpeg/ffprobe not installed ("install ffmpeg (brew install ffmpeg)").
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { checkSamples } from './src/samples.ts';
+import { checkSamples, MissingToolError } from './src/samples.ts';
 import { repoRoot } from './src/sc.ts';
 
 const USAGE = 'usage: samples-check.ts COS_<Name> [--dir samples/]';
@@ -45,6 +46,10 @@ let result;
 try {
   result = checkSamples(dir);
 } catch (e) {
+  if (e instanceof MissingToolError) {
+    console.error(`samples-check: ${e.tool} not found — install ffmpeg (brew install ffmpeg)`);
+    process.exit(2);
+  }
   fail((e as Error).message);
 }
 for (const line of result.lines) console.log(line);

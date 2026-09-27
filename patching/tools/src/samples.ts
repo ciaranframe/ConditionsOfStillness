@@ -65,6 +65,23 @@ export interface CheckOptions {
    * fail deliberately (a real corrupt/unreadable source already fails at `probe()`, before
    * ffmpeg is ever run). Defaults to `'ffmpeg'` (resolved via PATH). */
   ffmpegBin?: string;
+  /** The ffprobe binary `probe()` invokes (default `'ffprobe'` on PATH). */
+  ffprobeBin?: string;
+}
+
+/** ffmpeg or ffprobe is not installed (spawn ENOENT): the whole run cannot work, so this is
+ * thrown out of `checkSamples` instead of reporting every slot unreadable. */
+export class MissingToolError extends Error {
+  tool: string;
+  constructor(tool: string) {
+    super(`${tool} not found — install ffmpeg (brew install ffmpeg)`);
+    this.name = 'MissingToolError';
+    this.tool = tool;
+  }
+}
+
+function isEnoent(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'ENOENT';
 }
 
 // --- SHOPPING.md ---------------------------------------------------------------------------
@@ -198,13 +215,15 @@ export function assignFiles(files: string[], slots: Slot[]): { assigned: Map<str
 export type ProbeResult = { ok: true; channels: number; sr: number; seconds: number } | { ok: false; error: string };
 
 /** `ffprobe -v error -show_entries stream=channels,sample_rate:format=duration -of json <file>`.
- * A non-zero exit or unparsable output both come back as `{ ok: false, error }`. */
-export function probe(file: string): ProbeResult {
+ * A non-zero exit or unparsable output both come back as `{ ok: false, error }`; a missing
+ * ffprobe (spawn ENOENT) throws MissingToolError. */
+export function probe(file: string, ffprobeBin = 'ffprobe'): ProbeResult {
   const r = spawnSync(
-    'ffprobe',
+    ffprobeBin,
     ['-v', 'error', '-show_entries', 'stream=channels,sample_rate:format=duration', '-of', 'json', file],
     { encoding: 'utf8', timeout: 60000 },
   );
+  if (r.error && isEnoent(r.error)) throw new MissingToolError(ffprobeBin);
   if (r.error) return { ok: false, error: String((r.error as Error).message ?? r.error) };
   if (r.status !== 0) return { ok: false, error: (r.stderr || `ffprobe exited ${r.status}`).trim() };
   let parsed: any;
@@ -248,6 +267,7 @@ export function convert(src: string, dst: string, channels: 1 | 2, ffmpegBin = '
       ['-y', '-v', 'error', '-i', src, '-ar', '48000', '-ac', String(channels), '-c:a', 'pcm_s24le', tmp],
       { encoding: 'utf8', timeout: 60000 },
     );
+    if (r.error && isEnoent(r.error)) throw new MissingToolError(ffmpegBin);
     if (r.error || r.status !== 0) {
       // r.error is only sometimes set (a spawn failure, e.g. ENOENT) — String(undefined) would
       // otherwise stringify to the truthy "undefined" and mask the real fallback message below.
@@ -268,14 +288,25 @@ export function writeManifest(path: string, manifest: Manifest): void {
   writeAtomic(path, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-/** The manifest already on disk, or `{}` if there is none yet or it doesn't parse. */
-function readExistingManifest(path: string): Manifest {
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** The manifest already on disk: `{}` if there is none yet, it doesn't parse, or it is not a
+ * JSON object (an array, say); otherwise only the entries that are plain objects with a string
+ * `file` (anything else could not be checked against the disk, and would crash the merge). */
+export function readExistingManifest(path: string): Manifest {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8'));
-    return parsed && typeof parsed === 'object' ? (parsed as Manifest) : {};
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
   } catch {
     return {};
   }
+  if (!isPlainObject(parsed)) return {};
+  const out: Manifest = {};
+  for (const [slot, entry] of Object.entries(parsed)) {
+    if (isPlainObject(entry) && typeof entry.file === 'string') out[slot] = entry as unknown as ManifestEntry;
+  }
+  return out;
 }
 
 /** Merges this run's successful conversions into the manifest already on disk (ruling: manifest
@@ -373,10 +404,12 @@ function buildLines(slots: SlotOutcome[], extras: ExtraFile[]): string[] {
  * `SHOPPING.md`): matches files to slots, converts what it can (a conversion failure is caught
  * per slot and does not abort the run), merges the result into any `manifest.json` already on
  * disk and writes a `SOURCES.md` skeleton, and returns the report lines and exit code (Review
- * Focus 5). Throws only for a malformed `SHOPPING.md`/`SOURCES.md` (the CLI treats that as a
- * usage error). */
+ * Focus 5). Throws for a malformed `SHOPPING.md`/`SOURCES.md` (the CLI treats that as a
+ * usage error) and MissingToolError when ffmpeg/ffprobe is not installed (checked lazily, on the
+ * first slot that needs it; nothing is written in that case). */
 export function checkSamples(dir: string, opts: CheckOptions = {}): CheckResult {
   const ffmpegBin = opts.ffmpegBin ?? 'ffmpeg';
+  const ffprobeBin = opts.ffprobeBin ?? 'ffprobe';
   const slots = parseShopping(readFileSync(join(dir, 'SHOPPING.md'), 'utf8'));
   const files = listAudioFiles(dir);
   const { assigned, extras } = assignFiles(files, slots);
@@ -391,7 +424,7 @@ export function checkSamples(dir: string, opts: CheckOptions = {}): CheckResult 
       continue;
     }
     const srcPath = join(dir, file);
-    const sourceProbe = probe(srcPath);
+    const sourceProbe = probe(srcPath, ffprobeBin);
     if (!sourceProbe.ok) {
       outcomes.push({ slot: s.slot, status: 'unreadable', error: sourceProbe.error });
       continue;
@@ -401,8 +434,9 @@ export function checkSamples(dir: string, opts: CheckOptions = {}): CheckResult 
     let convertedProbe: ProbeResult;
     try {
       convert(srcPath, dstPath, targetChannels, ffmpegBin);
-      convertedProbe = probe(dstPath);
+      convertedProbe = probe(dstPath, ffprobeBin);
     } catch (e) {
+      if (e instanceof MissingToolError) throw e;
       const stderr = e instanceof ConvertError ? e.stderr : (e as Error).message;
       outcomes.push({ slot: s.slot, status: 'conversion-failed', error: (stderr.split('\n')[0] ?? stderr).trim() });
       continue;

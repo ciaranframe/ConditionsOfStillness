@@ -6,7 +6,9 @@
 // and a skip is NOT a pass: a run that reports skipped resolution tests has checked nothing; run
 // it from a checkout where airkit/ and patching/corpus/ exist (or set COS_MAIN_ROOT).
 // Checked docs: every references/*.md; engine.md must carry >= 40 citations, and every
-// engine-derived pitfalls.md entry (28 onwards) must carry at least one.
+// engine-derived pitfalls.md entry (28 onwards) must carry at least one. Also
+// patching/corpus/digest.md, whose pointers are `token` (<branch>/<path>:<line>) — the path is
+// under patching/corpus/ (digest.md's own "Pointers are …" convention).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -83,3 +85,52 @@ for (const doc of docs) {
     assert.deepEqual(failures, [], `${doc}: ${failures.length} citation(s) do not resolve`);
   });
 }
+
+// --- patching/corpus/digest.md ---------------------------------------------------------------
+
+const DIGEST = resolve(HERE, '../../corpus/digest.md');
+const BRANCHES = 'AirConcert|Airsticks-RPI|Airsticks-Desktop|master|MiMBrentonShows';
+const DIGEST_CITED = new RegExp(`\`([^\`\\n]+)\`\\s*\\(((?:${BRANCHES})\\/[^():\\n]+):(\\d+)\\)`, 'g');
+const DIGEST_ANY = new RegExp(`\\(((?:${BRANCHES})\\/[^():\\n]+):(\\d+)\\)`, 'g');
+
+export function parseDigestPointers(text: string): { cited: Citation[]; bare: string[] } {
+  const cited: Citation[] = [];
+  const at = new Set<number>();
+  for (const m of text.matchAll(DIGEST_CITED)) {
+    cited.push({ doc: 'digest.md', token: m[1]!, path: `patching/corpus/${m[2]!}`, line: Number(m[3]) });
+    at.add(m.index! + m[0].lastIndexOf('('));
+  }
+  const bare = [...text.matchAll(DIGEST_ANY)].filter((m) => !at.has(m.index!)).map((m) => m[0]);
+  return { cited, bare };
+}
+
+test('parseDigestPointers: token convention, line-wrapped pointers and bare pointers', () => {
+  const r = parseDigestPointers('`a = 1` (AirConcert/personalities/X.sc:3), `b`\n  (master/personalities/Y.sc:4); bare (Airsticks-RPI/synths/Z.sc:5); `c` (docs/q.md:1)');
+  assert.deepEqual(r.cited, [
+    { doc: 'digest.md', token: 'a = 1', path: 'patching/corpus/AirConcert/personalities/X.sc', line: 3 },
+    { doc: 'digest.md', token: 'b', path: 'patching/corpus/master/personalities/Y.sc', line: 4 },
+  ]);
+  assert.deepEqual(r.bare, ['(Airsticks-RPI/synths/Z.sc:5)']);
+});
+
+test('citations resolve: patching/corpus/digest.md', (t) => {
+  const { cited, bare } = parseDigestPointers(readFileSync(DIGEST, 'utf8'));
+  assert.ok(cited.length >= 80, `digest.md has only ${cited.length} checked pointers`);
+  assert.deepEqual(bare, [], `digest.md: pointers without a preceding \`token\`: ${bare.join(', ')}`);
+  if (!existsSync(MAIN_ROOT)) { t.skip(`main checkout not found at ${MAIN_ROOT} (set COS_MAIN_ROOT)`); return; }
+  const failures: string[] = [];
+  let checked = 0;
+  for (const c of cited) {
+    const tree = join(MAIN_ROOT, 'patching', 'corpus', c.path.split('/')[2]!);
+    if (!existsSync(tree)) continue; // that branch's raw files aren't materialised in this checkout
+    const file = join(MAIN_ROOT, c.path);
+    if (!existsSync(file)) { failures.push(`${c.path}:${c.line} — file not found`); continue; }
+    const lines = readFileSync(file, 'utf8').split('\n');
+    const line = lines[c.line - 1];
+    checked++;
+    if (line === undefined) failures.push(`${c.path}:${c.line} — past end of file (${lines.length} lines)`);
+    else if (!line.includes(c.token)) failures.push(`${c.path}:${c.line} — "${c.token}" not on that line: ${line.trim()}`);
+  }
+  if (checked === 0) { t.skip('no cited corpus branch is present under the main root'); return; }
+  assert.deepEqual(failures, [], `digest.md: ${failures.length} pointer(s) do not resolve`);
+});

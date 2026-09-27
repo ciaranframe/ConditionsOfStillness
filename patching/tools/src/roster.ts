@@ -9,9 +9,9 @@
 //
 // Parsing mirrors runner/src/scenes.ts's parseRosterFile (`/"([^"\n]+)"/g`) so both readers of
 // this file agree on what a name looks like.
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { writeAtomic } from './atomic.ts';
-import { rosterPath } from './sc.ts';
+import { personalityPath, rosterPath } from './sc.ts';
 
 /** Valid patch names for the roster CLI: COS_UpperCamel. Checked by the CLI, not the library
  * functions below (a caller building a roster programmatically may have its own reasons to pass
@@ -75,6 +75,13 @@ export function rosterRemove(name: string): boolean {
   const kept = names.filter((n, i) => i === 0 || i === last || n !== name);
   writeAtomic(rosterPath(), renderRoster(kept, header));
   return true;
+}
+
+/** The path `airkit/personalities/<name>.sc` when that file does not exist (so the roster CLI
+ * can refuse to list a patch the engine could never load), else null. */
+export function missingPersonality(name: string): string | null {
+  const path = personalityPath(name);
+  return existsSync(path) ? null : path;
 }
 
 /** The current roster, in order (for `patch-roster.ts list`). */
