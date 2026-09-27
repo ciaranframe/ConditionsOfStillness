@@ -7,6 +7,7 @@ export interface PersistedState {
   trims: Record<Wrist, number>;       // dB, Admin faders
   masterDb: number;
   panicked: boolean;                  // a restart inside the restore window comes back silent
+  liveSlots: Record<Wrist, 0 | 1>;    // each crossfader's slot index, so a restart re-pushes onto the slot that holds the sound
   savedAt: number;                    // Date.now()
 }
 
@@ -19,7 +20,10 @@ export class StateStore {
     try {
       const s = JSON.parse(readFileSync(this.path, 'utf8')) as PersistedState;
       if (typeof s.sceneIndex !== 'number' || typeof s.savedAt !== 'number' || !s.trims) return null;
-      return { ...s, panicked: s.panicked === true };   // files written before the field existed: not panicked
+      // Files written before these fields existed: not panicked, every crossfader on slot index 0.
+      const ls = (s.liveSlots ?? {}) as Partial<Record<Wrist, unknown>>;
+      const liveSlots = Object.fromEntries((['ZL', 'ZR', 'CL', 'CR'] as const).map((w) => [w, ls[w] === 1 ? 1 : 0])) as Record<Wrist, 0 | 1>;
+      return { ...s, panicked: s.panicked === true, liveSlots };
     } catch { return null; }
   }
   save(s: PersistedState): void {

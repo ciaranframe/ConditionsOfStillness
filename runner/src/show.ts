@@ -90,7 +90,8 @@ export class Show extends EventEmitter {
     return f ? Math.min(1, (this.clock() - f.startedAt) / 1000 / f.seconds) : null;
   }
   private changed() { this.emit('change'); }
-  persist(): void { this.store.save({ sceneIndex: this.sceneIndex, trims: { ...this.trims }, masterDb: this.masterDb, panicked: this.panicked, savedAt: this.wall() }); }
+  persist(): void { this.store.save({ sceneIndex: this.sceneIndex, trims: { ...this.trims }, masterDb: this.masterDb, panicked: this.panicked,
+    liveSlots: { ZL: this.wrists.ZL.liveSlot, ZR: this.wrists.ZR.liveSlot, CL: this.wrists.CL.liveSlot, CR: this.wrists.CR.liveSlot }, savedAt: this.wall() }); }
 
   next(source: CueSource): Promise<CueResult> { return this.goTo(this.sceneIndex + 1, source, 'next'); }
   back(source: CueSource): Promise<CueResult> { return this.goTo(this.sceneIndex - 1, source, 'back'); }
@@ -207,6 +208,7 @@ export class Show extends EventEmitter {
       rt.unloadTimer = timer;
     }
     if (waiting.length === 0) this.preloadNext();
+    else this.persist();                // the crossfaders moved: a restart must find them on their new slots
     this.changed();
     return 'done';
   }
@@ -241,6 +243,7 @@ export class Show extends EventEmitter {
   // Ruling 2: restore the scene only from a recent state; trims and master always come back.
   async boot(): Promise<void> {
     const s = this.store.load();
+    let liveSlots: Record<Wrist, 0 | 1> | null = null;
     if (s) {
       this.trims = { ...this.trims, ...s.trims };
       if (typeof s.masterDb === 'number') this.masterDb = s.masterDb;
@@ -248,11 +251,12 @@ export class Show extends EventEmitter {
       if (age < this.restoreWindowMs && s.sceneIndex >= STANDBY_INDEX && s.sceneIndex < this.scenes.length) {
         this.sceneIndex = s.sceneIndex;
         this.panicked = s.panicked === true;
+        liveSlots = s.liveSlots;          // crossfaders stay where the engine has them: no reload onto the other slot
         this.log(`restored scene ${this.current.id} (saved ${Math.round(age / 1000)} s ago)`);
         if (this.panicked) this.log('restored in PANIC — resume from Admin', 'error');
       } else this.log('starting in STANDBY (no recent state)');
     } else this.log('starting in STANDBY');
-    for (const w of WRISTS) this.wrists[w] = { ...freshRuntime(), live: this.panicked ? SILENCE : this.current.sounds[w] };
+    for (const w of WRISTS) this.wrists[w] = { ...freshRuntime(), liveSlot: liveSlots?.[w] ?? 0, live: this.panicked ? SILENCE : this.current.sounds[w] };
     // Heartbeat: savedAt only moves on changes, and a crash deep into a long scene must still restore it.
     if (!this.heartbeat) { this.heartbeat = setInterval(() => this.persist(), this.heartbeatMs); this.heartbeat.unref(); }
     this.airkit.on('online', this.onOnline);

@@ -61,7 +61,7 @@ export function buildView(d: ViewDeps): View {
     s ? { index: s.index, id: s.id, name: s.index < 0 ? '' : s.name, fade: s.fade, n: s.index + 1, summary: summarize(s, labels) } : null;
 
   const online = airkit.online;
-  const status = online ? airkit.status : null;   // AirkitLink keeps the last status after going offline: never show it as current
+  const status = online ? airkit.status : null;   // AirkitLink clears its status on going offline; the online check also covers the replies of a still-booting engine
   const levels = airkit.levels;
   const levelsAgeMs = levels ? Math.max(0, Math.round(now - levels.at)) : null;
 

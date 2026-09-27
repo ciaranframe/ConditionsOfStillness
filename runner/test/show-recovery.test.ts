@@ -294,3 +294,37 @@ test('re-push over a healthy engine loads nothing whose seat already matches; le
   assert.deepEqual(r.loads(m2), [[1 + r.show.wrists.ZL.liveSlot, 'COS_A']]);
   r.close();
 });
+
+test('a runner restart over a healthy engine keeps each crossfader on its slot and reloads nothing', async (t) => {
+  const r = await rig(t);
+  await r.show.next('pedal'); await sleep(300);   // → A: ZL, ZR, CR fade onto slot index 1
+  assert.equal(r.show.wrists.ZL.liveSlot, 1);
+  const saved = r.store.load()!;
+  assert.deepEqual(saved.liveSlots, { ZL: 1, ZR: 1, CL: 0, CR: 1 });
+  // The runner dies; a new one binds the same source port, so the engine sees the same nine devices.
+  const src = r.airkit.portOf(1);
+  r.show.dispose(); r.airkit.close();
+  await sleep(50);
+  const { AirkitLink } = await import('../src/airkit.ts');
+  const { Show } = await import('../src/show.ts');
+  const { parseScenes } = await import('../src/scenes.ts');
+  const { parseCast } = await import('../src/cast.ts');
+  const { SCENES, ROSTER } = await import('./rig.ts');
+  const airkit2 = new AirkitLink({ host: '127.0.0.1', port: r.fake.port, sourcePort: src, pollMs: 50, log: () => {} });
+  const cast = parseCast('sticks: { ZL: { id: 1, label: A3 } }\n').cast;
+  const lines: string[] = [];
+  const show2 = new Show({ scenes: parseScenes(SCENES, ROSTER).file!.scenes, airkit: airkit2, cast: () => cast, store: r.store, log: (m) => lines.push(m), readyTimeoutMs: 1000, unloadGraceMs: 10 });
+  t.after(() => { show2.dispose(); airkit2.close(); });
+  const m = r.mark();
+  await airkit2.start();
+  await show2.boot();
+  for (let i = 0; i < 50 && !airkit2.online; i++) await sleep(20);
+  await sleep(300);                  // the online event's pushAll settles
+  assert.equal(show2.sceneIndex, 0);
+  assert.equal(show2.wrists.ZL.liveSlot, 1);
+  assert.deepEqual(r.loads(m), [], 'no loadPersonality: every seat already holds what it should (slot 2 COS_A)');
+  const zl = r.sends('/airkit/cos/xfade', m).filter(([w]) => w === 'ZL');
+  assert.ok(zl.length > 0 && zl.every(([, pos]) => Number(pos) === 1), `ZL xfade stays on pos 1 (${JSON.stringify(zl)})`);
+  assert.equal(r.fake.devices.get(r.port(2))?.name, 'COS_A');
+  r.close();
+});
