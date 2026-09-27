@@ -40,25 +40,25 @@ test('serves pages and the view, pushes view+log over ws, dispatches commands wi
   await new Promise<void>((r) => { ws.on('message', (d) => { msgs.push(JSON.parse(String(d))); if (msgs.length >= 2) r(); }); });
   assert.deepEqual(msgs.map((m) => m.type).sort(), ['log', 'view']);
   log.line('hello');
-  ws.send(JSON.stringify({ id: 1, type: 'cue', action: 'next' }));
-  ws.send(JSON.stringify({ id: 2, type: 'jump', index: 42 }));
+  ws.send(JSON.stringify({ ackId: 1, type: 'cue', action: 'next' }));
+  ws.send(JSON.stringify({ ackId: 2, type: 'jump', index: 42 }));
   ws.send('not json');
-  ws.send(JSON.stringify({ id: 'x4', type: 'explode' }));
-  ws.send(JSON.stringify({ id: 5, type: 'trim', wrist: 'XX', db: 1 }));
+  ws.send(JSON.stringify({ ackId: 'x4', type: 'explode' }));
+  ws.send(JSON.stringify({ ackId: 5, type: 'trim', wrist: 'XX', db: 1 }));
   ws.send(JSON.stringify({ type: 'audition', wrist: 'CL', patch: null }));
   await new Promise((r) => setTimeout(r, 150));
   assert.ok(msgs.some((m) => m.type === 'log' && m.lines.some((l: any) => l.msg === 'hello')));
   const acks = msgs.filter((m) => m.type === 'ack');
   assert.equal(acks.length, 6);
-  const byId = (id: unknown) => acks.find((a) => a.id === id);
-  assert.deepEqual(byId(1), { type: 'ack', ok: true, id: 1 });
+  const byId = (id: unknown) => acks.find((a) => a.ackId === id);
+  assert.deepEqual(byId(1), { type: 'ack', ok: true, ackId: 1 });
   assert.equal(byId(2).ok, false); assert.match(byId(2).error, /no such scene/);
   assert.equal(byId('x4').ok, false); assert.match(byId('x4').error, /unknown/);
   assert.equal(byId(5).ok, false);
-  const anon = acks.filter((a) => !('id' in a));
+  const anon = acks.filter((a) => !('ackId' in a));
   assert.deepEqual(anon.map((a) => a.ok).sort(), [false, true]);   // 'not json' and the audition
   assert.ok(anon.some((a) => a.error === 'bad json'));
-  assert.deepEqual(got, [{ type: 'cue', action: 'next' }, { type: 'jump', index: 42 }, { type: 'audition', wrist: 'CL', patch: null }]);   // id stripped
+  assert.deepEqual(got, [{ type: 'cue', action: 'next' }, { type: 'jump', index: 42 }, { type: 'audition', wrist: 'CL', patch: null }]);   // ackId stripped
   assert.ok(msgs.filter((m) => m.type === 'view').length >= 2, 'periodic view broadcast');
   const before = msgs.filter((m) => m.type === 'view').length;
   srv.broadcast();
@@ -100,21 +100,19 @@ test('every command variant is accepted and malformed fields are refused', async
   const acks: any[] = [];
   ws.on('message', (d) => { const m = JSON.parse(String(d)); if (m.type === 'ack') acks.push(m); });
   await new Promise((r) => ws.on('open', r));
-  // assignStick's own `id` is the stick id, so it carries no correlation id and its ack has none
-  const tagged = (c: any, i: number) => (c === null || Array.isArray(c) || c.type === 'assignStick' ? c : { ...c, id: i });
+  const tagged = (c: any, i: number) => (c === null || Array.isArray(c) ? c : { ...c, ackId: i });
   [...ok, ...bad].forEach((c, i) => ws.send(JSON.stringify(tagged(c, i))));
   for (let i = 0; i < 50 && acks.length < ok.length + bad.length; i++) await new Promise((r) => setTimeout(r, 10));
   assert.equal(acks.length, ok.length + bad.length);
-  ok.forEach((c, i) => { if (c.type !== 'assignStick') assert.equal(acks.find((a) => a.id === i)?.ok, true, `ok[${i}]`); });
-  bad.forEach((c: any, i) => { if (tagged(c, 0) !== c) assert.equal(acks.find((a) => a.id === ok.length + i)?.ok, false, `bad[${i}]`); });
-  assert.equal(acks.filter((a) => a.ok === true).length, ok.length);
+  ok.forEach((_, i) => assert.equal(acks.find((a) => a.ackId === i)?.ok, true, `ok[${i}]`));
+  bad.forEach((c: any, i) => { if (tagged(c, 0) !== c) assert.equal(acks.find((a) => a.ackId === ok.length + i)?.ok, false, `bad[${i}]`); });
   assert.equal(acks.filter((a) => a.ok === false).length, bad.length);
-  assert.ok(acks.every((a) => a.id === undefined || typeof a.id === 'number'), 'an assignStick ack never echoes the stick id');
+  assert.ok(acks.every((a) => !('id' in a)), 'acks never carry an id');
   assert.deepEqual(got, ok);
   ws.close();
 });
 
-test('a panic is not held behind a cue still awaiting ready; acks carry the client id', async (t) => {
+test('a panic is not held behind a cue still awaiting ready; acks carry the client ackId', async (t) => {
   const pub = mkdtempSync(join(tmpdir(), 'cos-pub-'));
   const srv = await startServer({ port: 0, publicDir: pub, view: () => ({}) as never, log: new Log(10, Date.now, () => {}),
     onCommand: async (c) => { if (c.type === 'cue') await new Promise((r) => setTimeout(r, 300)); } });
@@ -123,10 +121,10 @@ test('a panic is not held behind a cue still awaiting ready; acks carry the clie
   const acks: any[] = [];
   const both = new Promise<void>((r) => ws.on('message', (d) => { const m = JSON.parse(String(d)); if (m.type === 'ack') { acks.push(m); if (acks.length === 2) r(); } }));
   await new Promise((r) => ws.on('open', r));
-  ws.send(JSON.stringify({ id: 'c', type: 'cue', action: 'next' }));
-  ws.send(JSON.stringify({ id: 'p', type: 'panic' }));
+  ws.send(JSON.stringify({ ackId: 'c', type: 'cue', action: 'next' }));
+  ws.send(JSON.stringify({ ackId: 'p', type: 'panic' }));
   await both;
-  assert.deepEqual(acks.map((a) => a.id), ['p', 'c']);
+  assert.deepEqual(acks.map((a) => a.ackId), ['p', 'c']);
   assert.ok(acks.every((a) => a.ok));
   ws.close();
 });
@@ -158,4 +156,19 @@ test('a static file that cannot be read answers instead of crashing', async (t) 
   t.after(() => srv.close());
   const res = await fetch(`http://127.0.0.1:${srv.port}/locked.js`);
   assert.equal(res.status, 404); await res.text();
+});
+
+test('assignStick keeps its stick id; the ack echoes ackId', async (t) => {
+  const pub = mkdtempSync(join(tmpdir(), 'cos-pub-'));
+  const got: unknown[] = [];
+  const srv = await startServer({ port: 0, publicDir: pub, view: () => ({}) as never, log: new Log(10, Date.now, () => {}), onCommand: (c) => { got.push(c); } });
+  t.after(() => srv.close());
+  const ws = new WebSocket(`ws://127.0.0.1:${srv.port}`);
+  const ack = new Promise<any>((r) => ws.on('message', (d) => { const m = JSON.parse(String(d)); if (m.type === 'ack') r(m); }));
+  await new Promise((r) => ws.on('open', r));
+  ws.send(JSON.stringify({ type: 'assignStick', wrist: 'CL', id: '7', ackId: 3 }));
+  assert.deepEqual(await ack, { type: 'ack', ok: true, ackId: 3 });
+  assert.deepEqual(got, [{ type: 'assignStick', wrist: 'CL', id: '7' }]);
+  assert.ok(!('ackId' in (got[0] as object)));
+  ws.close();
 });

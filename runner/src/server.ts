@@ -1,6 +1,14 @@
 // HTTP (the two pages, static files, /api/view) + WebSocket (view and log out, commands in) on one port.
 // Shape, MIME table and static serving follow the Glimmer show engine's src/server/http.ts
 // (code/show-engine/src/server/http.ts, Ciaran Frame 2026); the traversal guard is tightened here.
+//
+// WebSocket protocol (JSON text frames):
+//   server → client  { type: 'view', view: View }            on connect, on broadcast(), every broadcastMs while clients are connected
+//                    { type: 'log', lines: LogLine[] }         on connect (last 200 lines), then one frame per new line
+//                    { type: 'ack', ok: boolean, ackId?, error? }  one per client frame
+//   client → server  a Command, optionally with `ackId` (number or string). The ack echoes that `ackId`; the
+//                    command itself never sees it. Commands run as they arrive, so acks may come back out of
+//                    order: correlate by `ackId`, never by position. (`ackId`, not `id`: assignStick's `id` is the stick.)
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve, sep } from 'node:path';
@@ -31,13 +39,11 @@ const PAGES: Record<string, string> = { '/perform': 'perform.html', '/admin': 'a
 const RECENT_LOG_LINES = 200;
 const QUIET = new Set<Command['type']>(['trim', 'master']);   // sliders send up to 10/s while dragged: not logged per message
 
-/** The optional client-supplied correlation id a command carries, echoed on its ack. `assignStick` is the
- *  exception: its `id` is the stick id (Command shape fixed by the pages), so its ack carries no id. */
-function ackId(x: unknown): number | string | undefined {
+/** The optional client-supplied `ackId` a command carries, echoed on its ack. */
+function ackIdOf(x: unknown): number | string | undefined {
   if (typeof x !== 'object' || x === null) return undefined;
-  const { id, type } = x as { id?: unknown; type?: unknown };
-  if (type === 'assignStick') return undefined;
-  return typeof id === 'number' || typeof id === 'string' ? id : undefined;
+  const { ackId } = x as { ackId?: unknown };
+  return typeof ackId === 'number' || typeof ackId === 'string' ? ackId : undefined;
 }
 
 /** The file a URL path names inside publicDir, or null when it is malformed or would escape it. */
@@ -67,7 +73,7 @@ const isWrist = (x: unknown): x is Wrist => typeof x === 'string' && (WRISTS as 
 const isNum = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 
-/** A well-formed Command (only its own fields kept; a correlation `id` is stripped), or an error string. */
+/** A well-formed Command (only its own fields kept, so `ackId` is stripped), or an error string. */
 export function parseCommand(x: unknown): Command | string {
   if (!isRecord(x)) return 'command must be an object';
   const bad = (what: string) => `${String(x.type)}: ${what}`;
@@ -126,12 +132,12 @@ export function startServer(opts: ServerOptions): Promise<{ port: number; broadc
     const v = viewJson(); if (v) send(v);
     send({ type: 'log', lines: log.recent(RECENT_LOG_LINES) });
     // Every command is dispatched at once: a panic must not wait behind a cue that is awaiting ready.
-    // Acks may therefore arrive out of order; a client correlates them by the optional `id` it sent.
+    // Acks may therefore arrive out of order; a client correlates them by the optional `ackId` it sent.
     ws.on('message', (raw) => {
       let parsed: unknown;
       try { parsed = JSON.parse(String(raw)); } catch { send({ type: 'ack', ok: false, error: 'bad json' }); return; }
-      const id = ackId(parsed);
-      const ack = (ok: boolean, error?: string) => send({ type: 'ack', ok, ...(id !== undefined ? { id } : {}), ...(error !== undefined ? { error } : {}) });
+      const ackId = ackIdOf(parsed);
+      const ack = (ok: boolean, error?: string) => send({ type: 'ack', ok, ...(ackId !== undefined ? { ackId } : {}), ...(error !== undefined ? { error } : {}) });
       const cmd = parseCommand(parsed);
       if (typeof cmd === 'string') { log.line(`[web] ${who}: refused — ${cmd}`, 'warn'); ack(false, cmd); return; }
       if (!QUIET.has(cmd.type)) log.line(`[web] ${who}: ${JSON.stringify(cmd)}`);
