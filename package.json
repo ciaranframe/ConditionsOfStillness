@@ -6,6 +6,7 @@
   "scripts": {
     "test": "node --test \"scripts/test/*.test.ts\" \"runner/test/*.test.ts\"",
     "setup:check": "node scripts/setup.ts --check",
-    "smoke": "node scripts/engine-smoke.ts"
+    "smoke": "node scripts/engine-smoke.ts",
+    "smoke:runner": "node scripts/runner-smoke.ts"
   }
 }

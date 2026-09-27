@@ -59,8 +59,10 @@ this one; `./setup.sh --check` reports whether the mirror is reachable.
 - `node scripts/engine-ping.ts` — prints roster, seats, state and `[COS]` status of a running engine.
 - `npm run smoke` — boots a private engine on ports 57130/57131, drives it with fake sticks and
   checks the `[COS]` contract end to end (audible for ~10 s). Safe while a real engine runs.
-- `npm run smoke:runner` — the same private engine driven by the real runner, fake sticks and
-  WebSocket cues.
+- `npm run smoke:runner` — the same private engine (57130/57131) driven by the real runner (sticks
+  8010, pages 3010), fake sticks and WebSocket cues: standby preload, cues, live params, panic/resume,
+  audition (~15 s warm). Logs `~/.conditions/runner-smoke.log` (engine) and `runner-smoke.runner.log`.
+  Safe while a real engine runs, not alongside a running runner or `npm run smoke` (all bind port 9001).
 - OSC contract: `airkit/code3.0/API.md`, the `[COS]` sections.
 
 ## cast.yaml
