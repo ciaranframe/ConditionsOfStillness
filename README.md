@@ -87,4 +87,43 @@ or CC number it sends. Set those numbers as `pedal.next` and `pedal.back` in `ca
 `pedal.input` if more than one MIDI device is connected). Without a footswitch, the keys and the
 page buttons cue the same way.
 
+## Patching
+Sounds are AirKit personalities, `airkit/personalities/COS_<Name>.sc`, written with the
+`airkit-patch` skill (`.claude/skills/airkit-patch/SKILL.md`): in Claude Code,
+`/airkit-patch <brief> [--profile patching/profile.md]`, e.g. `/airkit-patch a breath-like sound
+for a still left hand over the keys`. The skill is generic; everything about this piece (names,
+roster, template, level plan, hand-off format) comes from `patching/profile.md`. It stops for
+Ciaran before any samples are downloaded and after the hand-off.
+
+Workflow: **context** (profile + every file in `patching/context/`) → **research** (six tracks
+in parallel: physics, synthesis prior art, musical world, gesture, SuperCollider practice,
+Steph's corpus) → **note** (`patching/notes/COS_<Name>.md`) → **patch** (copied from
+`airkit/personalities/COS_Template.sc`, written to a `.tmp` and moved into place — the engine
+hot-loads on save) → **compile** → **lint** → **roster** (then commit `cos: …` in `airkit/`, push
+`mirror`, update `airkit.lock`) → **audition** on slot 9 → **samples** (only if the header
+declares slots) → **hand-off** in piano and drum terms → iterate on notes.
+
+| Tool | Does | Command |
+|---|---|---|
+| `patch-compile.sh` | headless sclang parse check (~3 s), never executes the patch | `npm run patch:compile -- <Name\|path>` |
+| `patch-lint.ts` | static rules from the profile: header, naming, hooks, scene params, `~partner`, tick safety, sample paths, SynthDef names, unknown classes, roster | `npm run patch:lint -- <Name> [--json]` |
+| `patch-roster.ts` | adds/removes/lists patches in `airkit/lists/list_conditions.sc`, atomically | `npm run patch:roster -- add\|remove <Name>` / `list` |
+| `patch-audition.ts` | plays a patch on audition slot 9 with synthetic gestures or a take; peak/RMS per phase, errors, silence on unload | `npm run patch:audition -- <Name> [--quick\|--long\|--take <label>] [--params k=v,…]` |
+| `take-record.ts` | records one wrist's IMU stream to `takes/<label>.take.jsonl` | `npm run take:record -- <label> --wrist ZL [--seconds 30]` |
+| `samples-check.ts` | matches downloaded files to `SHOPPING.md` slots, converts to 48 kHz WAV, writes `manifest.json` and `SOURCES.md` | `npm run samples:check -- COS_<Name>` |
+| `corpus-mine.ts` | mines every AirKit branch's personalities from git objects into `patching/corpus/` | `npm run corpus:mine` |
+
+Full flags and exit codes: `patching/tools/README.md`. The audition uses a running engine on
+57120 if one answers, else boots a private one on 57130/57131; next to a live runner it never
+touches slots 1–8, but it plays through the real output.
+
+| Path | What |
+|---|---|
+| `patching/profile.md` | the piece profile the skill and lint read |
+| `patching/context/` | programme note, scene notes — read in full before every patch |
+| `patching/notes/` | one research note per patch; `EXAMPLE.md` is the worked example of the research stage |
+| `patching/corpus/` | `index.json`, `INDEX.md`, `stats.md`, `digest.md` (committed); raw mined files per branch (gitignored, main checkout only). Re-mine with `npm run corpus:mine` |
+| `samples/COS_<Name>/` | `SHOPPING.md`, `manifest.json`, `SOURCES.md` committed; audio gitignored |
+| `takes/` | `<label>.take.jsonl` gitignored; `INDEX.md` committed |
+
 First rehearsal: `docs/rehearsal-checklist.md`.

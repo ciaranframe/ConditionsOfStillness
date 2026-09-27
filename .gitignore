@@ -25,3 +25,5 @@ takes/*.take.jsonl
 patching/corpus/*/
 # atomic-write temporaries
 *.tmp
+# isolated agent worktrees live inside the repo tree
+.claude/worktrees/
