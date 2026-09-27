@@ -297,3 +297,32 @@ test('takePhases: a malformed row (wrong arity or non-finite) is skipped, the re
 test('takePhases: an empty take (header only) yields no phases', () => {
   assert.deepEqual(takePhases([takeHeader('empty')]), []);
 });
+
+test('takePhases: pose() returns fresh arrays — mutating one query must not corrupt the next', () => {
+  const lines = [takeHeader('mutcheck')];
+  for (let i = 0; i < 200; i++) {
+    lines.push(JSON.stringify({ t: i * 10, a: [i, i + 1, i + 2], q: [0, 0, 0, 1] }));
+  }
+  const [w0] = takePhases(lines, 1);
+  const first = w0!.pose(0.015); // holds row index 1: a=[1,2,3]
+  assert.equal(first.a[2], 3);
+  first.a[2] = 999;
+  first.q[0] = 999;
+  const second = w0!.pose(0.015);
+  assert.equal(second.a[2], 3, 'a mutated through one pose() result leaked into the next query');
+  assert.equal(second.q[0], 0, 'q mutated through one pose() result leaked into the next query');
+});
+
+test('takePhases: a header-less take (first line is already a row) keeps all 200 rows, starting at t=0', () => {
+  const lines: string[] = [];
+  for (let i = 0; i < 200; i++) {
+    lines.push(JSON.stringify({ t: i * 10, a: [i, i + 1, i + 2], q: [0, 0, 0, 1] }));
+  }
+
+  const phases = takePhases(lines, 1);
+  assert.equal(phases.length, 2, `expected 2 windows, got ${phases.length}`);
+  assert.equal(phases[0]!.label, 'take 0–1s'); // no header -> default label, not row 0 swallowed as one
+  // row 0 (t=0) must still be present: querying t=0 in window 0 returns it, not row 1.
+  assert.equal(phases[0]!.pose(0).a[0], 0);
+  assert.ok(Math.abs(phases[1]!.seconds - 0.99) < 1e-6, `second window seconds = ${phases[1]!.seconds}`);
+});

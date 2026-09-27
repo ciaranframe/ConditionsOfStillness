@@ -67,7 +67,9 @@ function swayPhase(seconds: number, hz = 0.5, amp = 3): Phase {
 }
 
 // Sinusoidal shake on z (amp `ampZ`) with a smaller companion wobble on x (amp `ampX`), no
-// rotation.
+// rotation. The x wobble is deliberately in phase with z (same `sin(2*pi*hz*t)`), not a
+// separate oscillator — a hard shake couples both axes together rather than beating against
+// each other.
 function shakePhase(seconds: number, hz = 6, ampZ = 6, ampX = 2): Phase {
   return {
     name: 'shake',
@@ -199,6 +201,16 @@ function formatSec(n: number): string {
   return rounded.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
 }
 
+/** True for an object that looks like Task 4's take header (`{label, wrist, id, startedAt,
+ * hz}`) rather than a row: a row always carries `t`/`a`/`q`, a header never does. Used so a
+ * header-less take (lines are rows from the very first line) still keeps all of its rows,
+ * instead of always discarding `lines[0]` as if it were a header. */
+function looksLikeHeader(obj: unknown): obj is { label?: unknown } {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const o = obj as Record<string, unknown>;
+  return !('t' in o) && !('a' in o) && !('q' in o);
+}
+
 /** Parses a take file (header line + row lines, Task 4's shapes) into one replay phase per
  * `windowSec`-second window (the last window is shorter when the take's duration isn't an exact
  * multiple). Each phase's `pose(t)` holds the take's row at or before that instant — clamping to
@@ -209,15 +221,20 @@ export function takePhases(lines: string[], windowSec = 5): Phase[] {
   if (lines.length === 0) return [];
 
   let label = 'take';
+  let rowLines = lines;
+  let firstParsed: unknown;
   try {
-    const header = JSON.parse(lines[0]!) as { label?: unknown };
-    if (typeof header.label === 'string') label = header.label;
+    firstParsed = JSON.parse(lines[0]!);
   } catch {
-    // fall through with the default label
+    firstParsed = undefined;
+  }
+  if (firstParsed !== undefined && looksLikeHeader(firstParsed)) {
+    if (typeof firstParsed.label === 'string') label = firstParsed.label;
+    rowLines = lines.slice(1);
   }
 
   const rows: Row[] = [];
-  for (const line of lines.slice(1)) {
+  for (const line of rowLines) {
     if (line.trim() === '') continue;
     const row = parseRow(line);
     if (row) rows.push(row);
@@ -244,7 +261,8 @@ export function takePhases(lines: string[], windowSec = 5): Phase[] {
       }
     }
     const row = rows[ans]!;
-    return { a: row.a, q: row.q };
+    // fresh copies: a caller mutating a returned pose must not corrupt a later query.
+    return { a: [...row.a], q: [...row.q] };
   };
 
   const phases: Phase[] = [];
