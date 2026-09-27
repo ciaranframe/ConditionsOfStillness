@@ -1,0 +1,18 @@
+{
+  "name": "conditions-runner",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test \"test/*.test.ts\"",
+    "dev:fake": "node src/dev-fake.ts"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1",
+    "ws": "^8.22.0"
+  },
+  "optionalDependencies": {
+    "@julusian/midi": "^3.8.1"
+  }
+}
