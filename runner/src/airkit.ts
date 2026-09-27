@@ -65,6 +65,8 @@ export class AirkitLink extends EventEmitter {
   get levels() { return this._levels; }
   get lastStatusAt() { return this._lastStatusAt; }
   get seatsAsked() { return this._seatsAsked; }
+  get host() { return this.opts.host; }
+  get port() { return this.opts.port; }
 
   portOf(slot: number) { return this.sourcePort + slot - 1; }
 
