@@ -6,7 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
-export const SCLANG = '/Applications/SuperCollider.app/Contents/MacOS/sclang';
+// COS_SCLANG overrides (tests use it to exercise a missing sclang).
+export const SCLANG = process.env.COS_SCLANG ?? '/Applications/SuperCollider.app/Contents/MacOS/sclang';
 
 // Walk up from this file to find airkit.lock, which lives at the repo root. COS_REPO_ROOT
 // overrides for tests or an unusual checkout (same idiom as scripts/setup.ts's findRepoRoot).

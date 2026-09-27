@@ -8,7 +8,7 @@
     "setup:check": "node scripts/setup.ts --check",
     "smoke": "node scripts/engine-smoke.ts",
     "smoke:runner": "node scripts/runner-smoke.ts",
-    "patch:compile": "patching/tools/patch-compile.sh",
+    "patch:compile": "node patching/tools/patch-compile.ts",
     "patch:lint": "node patching/tools/patch-lint.ts",
     "patch:audition": "node patching/tools/patch-audition.ts",
     "patch:roster": "node patching/tools/patch-roster.ts",

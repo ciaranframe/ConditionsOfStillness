@@ -273,6 +273,29 @@ test('synthdef.collision: another personality\'s SynthDef and the engine\'s', ()
   fires(fix(atTop(BASE, 'SynthDef(\\cosWristMonitor, { Out.ar(0, 0) }).add;')), 'synthdef.collision', 'E');
 });
 
+test('a .sc.tmp edit copy lints as its patch name: no name error, no collision with its own installed .sc', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cos-lint-tmp-'));
+  const tmp = join(dir, 'COS_Template.sc.tmp');
+  writeFileSync(tmp, TEMPLATE);
+  const issues = lint(tmp);
+  quiet(issues, 'name.cos-prefix');
+  quiet(issues, 'synthdef.collision'); // \cosTemplateVoice is in airkit/personalities/COS_Template.sc, the file this replaces
+  quiet(issues, 'roster.missing');
+  assert.deepEqual(errors(issues).map(formatIssue), []);
+  // the same text under another name still collides with COS_Template.sc
+  const other = join(dir, 'COS_Other.sc.tmp');
+  writeFileSync(other, TEMPLATE);
+  fires(lint(other), 'synthdef.collision', 'E');
+});
+
+test('CLI: a .sc.tmp path exits 0 for a clean copy of the template', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cos-lint-tmp-'));
+  const tmp = join(dir, 'COS_Template.sc.tmp');
+  writeFileSync(tmp, TEMPLATE);
+  const r = spawnSync(process.execPath, [CLI, tmp], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+});
+
 test('pdef.literal-name: a literal Pdef key warns', () => {
   fires(fix(atTop(BASE, 'Pdef(\\cosFixtureLoop, Pbind(\\dur, 1));')), 'pdef.literal-name', 'W');
 });

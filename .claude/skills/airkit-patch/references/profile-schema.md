@@ -26,7 +26,7 @@ repo-relative (absolute also accepted).
 | `gestureWords` | list | `[sway, shake, tilt, strike, stillness, hold, turn, flip, twist, roll, direction]` | the closed vocabulary for `gestures:` | lint `header.gestures-grammar` |
 
 Tools that do **not** read the profile today: `patch-roster.ts` (name rule `COS_` and roster
-path are fixed in `src/roster.ts` / `src/sc.ts`), `patch-compile.sh`, `patch-audition.ts`
+path are fixed in `src/roster.ts` / `src/sc.ts`), `patch-compile.ts`, `patch-audition.ts`
 (slot 9 and ports are its own flags), `samples-check.ts` (samples folder by `--dir`). A second
 piece would need those parameterised; the skill must not assume they follow the profile.
 

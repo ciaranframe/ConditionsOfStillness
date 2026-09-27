@@ -254,11 +254,18 @@ function partnerGuarded(code: string, at: number): boolean {
 
 // --- the linter ------------------------------------------------------------------------------
 
+/** The patch name a file lints as: its basename without a trailing `.tmp` (the skill's edit
+ * copy, `COS_X.sc.tmp`) and then without `.sc` — so `COS_X.sc.tmp` lints as `COS_X`, and the
+ * SynthDef collision scan skips the installed `COS_X.sc` it is about to replace. */
+export function patchNameOf(path: string): string {
+  return basename(path).replace(/\.tmp$/, '').replace(/\.sc$/, '');
+}
+
 export function lint(path: string, opts: LintOptions = {}): Issue[] {
   const abs = resolve(path);
   const rel = relative(repoRoot(), abs);
   const file = opts.file ?? (rel.startsWith('..') || isAbsolute(rel) ? abs : rel);
-  return lintSource(basename(abs, '.sc'), readFileSync(abs, 'utf8'), { ...opts, file });
+  return lintSource(patchNameOf(abs), readFileSync(abs, 'utf8'), { ...opts, file });
 }
 
 export function lintSource(name: string, src: string, opts: LintOptions = {}): Issue[] {
@@ -444,6 +451,8 @@ export function lintSource(name: string, src: string, opts: LintOptions = {}): I
   }
   if (existsSync(profile.personalities)) {
     for (const f of readdirSync(profile.personalities)) {
+      // skips this patch's own installed file — also when linting its `.tmp` edit copy, which
+      // replaces that file on the `mv` (the .tmp itself never ends in .sc, so it is not scanned)
       if (!f.endsWith('.sc') || f === `${name}.sc`) continue;
       for (const n of synthDefsInFile(join(profile.personalities, f))) if (!others.has(n)) others.set(n, f);
     }

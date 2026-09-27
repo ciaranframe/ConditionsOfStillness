@@ -105,7 +105,7 @@ declares slots) → **hand-off** in piano and drum terms → iterate on notes.
 
 | Tool | Does | Command |
 |---|---|---|
-| `patch-compile.sh` | headless sclang parse check (~3 s), never executes the patch | `npm run patch:compile -- <Name\|path>` |
+| `patch-compile.ts` | headless sclang parse check (~3 s), never executes the patch; takes the `.sc.tmp` before the `mv` | `npm run patch:compile -- <Name\|path>` |
 | `patch-lint.ts` | static rules from the profile: header, naming, hooks, scene params, `~partner`, tick safety, sample paths, SynthDef names, unknown classes, roster | `npm run patch:lint -- <Name> [--json]` |
 | `patch-roster.ts` | adds/removes/lists patches in `airkit/lists/list_conditions.sc`, atomically | `npm run patch:roster -- add\|remove <Name>` / `list` |
 | `patch-audition.ts` | plays a patch on audition slot 9 with synthetic gestures or a take; peak/RMS per phase, errors, silence on unload | `npm run patch:audition -- <Name> [--quick\|--long\|--take <label>] [--params k=v,…]` |
