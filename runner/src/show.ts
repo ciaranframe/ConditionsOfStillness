@@ -373,6 +373,12 @@ export class Show extends EventEmitter {
     const curId = this.sceneIndex >= 0 ? this.current.id : null;
     this.scenes = scenes;
     const idx = curId === null ? STANDBY_INDEX : scenes.findIndex((s) => s.id === curId);
+    if (this.panicked) {                // a re-cue would un-panic and bring the sound back: only move the pointer
+      this.sceneIndex = idx < 0 ? STANDBY_INDEX : idx;
+      this.log('scenes file reloaded while panicked — not re-cued', 'warn');
+      this.persist(); this.changed();
+      return;
+    }
     if (curId !== null && idx < 0) {
       this.log(`scenes file changed: current scene ${curId} is gone — STANDBY`, 'warn');
       await this.goTo(STANDBY_INDEX, 'scenes-file');

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { rig } from './show.test.ts';
+import { rig } from './rig.ts';
 import { SILENCE } from '../src/scenes.ts';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -177,5 +177,36 @@ test('reconcile ignores a seats reply asked before our load: no spurious reloads
   for (let i = 0; i < 50 && !r.airkit.online; i++) await sleep(20);
   await sleep(400);
   assert.deepEqual(r.lines.filter((l) => /reloading|giving up/.test(l)), []);
+  r.close();
+});
+
+test('replaceScenes while panicked stays silent; resume brings the new scene back', async (t) => {
+  const r = await rig(t);
+  await r.show.jump(1, 'admin'); await sleep(150);
+  r.show.panic();
+  await sleep(50);
+  const { parseScenes } = await import('../src/scenes.ts');
+  const changed = parseScenes(`
+piece: T
+defaults: { fade: 0.05, level: 0 }
+scenes:
+  - { id: A, name: One, sounds: { ZL: COS_A } }
+  - { id: B, name: Two, sounds: { ZL: COS_B } }
+`, ['silence', 'COS_A', 'COS_B', 'silence']).file!.scenes;
+  const m = r.mark();
+  await r.show.replaceScenes(changed);
+  await sleep(150);
+  assert.equal(r.show.panicked, true);
+  assert.equal(r.fake.panics, 1);
+  assert.equal(r.show.sceneIndex, 1);
+  assert.deepEqual(r.loads(m), [], 'nothing loaded while panicked');
+  for (const w of ['ZL', 'ZR', 'CL', 'CR'] as const) assert.deepEqual(r.show.wrists[w].live, SILENCE);
+  assert.ok(r.lines.some((l) => /scenes file reloaded while panicked — not re-cued/.test(l)));
+  const m2 = r.mark();
+  await r.show.resume();
+  await sleep(150);
+  assert.equal(r.show.panicked, false);
+  assert.equal(r.show.wrists.ZL.live.patch, 'COS_B');
+  assert.ok(r.loads(m2).some(([s, p]) => (s === 1 || s === 2) && p === 'COS_B'));
   r.close();
 });
