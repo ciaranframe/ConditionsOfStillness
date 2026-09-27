@@ -47,3 +47,19 @@ test('wristOfStickId and whoOf', () => {
   assert.equal(whoOf('ZL'), 'Zubin · left');
   assert.equal(whoOf('CR'), 'Claire · right');
 });
+
+test('assignStickInFile works when sticks: is absent, when the wrist is absent, and on an empty file', () => {
+  for (const text of ['pedal: {}\n', 'sticks: { ZL: { id: 1 } }\n', '']) {
+    const out = assignStickInFile(text, 'CL', '7', 'B1', null);
+    const { cast, errors } = parseCast(out);
+    assert.deepEqual(errors, [], text);
+    assert.deepEqual(cast.sticks.CL, { id: '7', label: 'B1', ip: null }, text);
+  }
+  assert.equal(parseCast(assignStickInFile('sticks: { ZL: { id: 1 } }\n', 'CL', '7')).cast.sticks.ZL.id, '1');
+});
+
+test('parseCast on malformed yaml returns defaults with a yaml error', () => {
+  const { cast, errors } = parseCast('sticks: [\n');
+  assert.equal(cast.network.webPort, DEFAULT_CAST.network.webPort);
+  assert.match(errors[0]!, /^yaml:/);
+});
