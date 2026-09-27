@@ -58,7 +58,7 @@ export function buildView(d: ViewDeps): View {
   const signals = sticks.wrists();
   const labels = { sticks: Object.fromEntries(WRISTS.map((w) => [w, { label: signals[w].label }])) as Record<Wrist, { label: string }> };
   const sceneView = (s: Scene | null): SceneView | null =>
-    s ? { index: s.index, id: s.id, name: s.name, fade: s.fade, n: s.index + 1, summary: summarize(s, labels) } : null;
+    s ? { index: s.index, id: s.id, name: s.index < 0 ? '' : s.name, fade: s.fade, n: s.index + 1, summary: summarize(s, labels) } : null;
 
   const online = airkit.online;
   const status = online ? airkit.status : null;   // AirkitLink keeps the last status after going offline: never show it as current

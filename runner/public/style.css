@@ -189,8 +189,10 @@ body.admin .head-group { display: flex; align-items: baseline; gap: calc(14 * va
 body.admin .head-group.next { gap: calc(10 * var(--u)); flex: none; }
 body.admin .head-id { font-size: calc(64 * var(--u)); font-weight: 700; line-height: 0.95; flex: none; }
 body.admin .head-id.standby { font-size: calc(32 * var(--u)); }
-body.admin .head-name { font-size: calc(28 * var(--u)); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-body.admin .head-sub { font-family: var(--mono); font-size: calc(12 * var(--u)); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 4; }
+body.admin .head-group:not(.next) { align-items: center; }
+body.admin .head-text { display: flex; flex-direction: column; gap: calc(4 * var(--u)); min-width: 0; }
+body.admin .head-name { font-size: calc(24 * var(--u)); font-weight: 600; line-height: 1.1; overflow-wrap: anywhere; min-width: 0; }
+body.admin .head-sub { font-family: var(--mono); font-size: calc(12 * var(--u)); color: var(--muted); white-space: nowrap; }
 body.admin .head-next-id { font-size: calc(40 * var(--u)); font-weight: 700; line-height: 0.95; }
 body.admin .head-next-name { font-size: calc(20 * var(--u)); white-space: nowrap; }
 body.admin .head-alert { font-family: var(--mono); font-size: calc(12 * var(--u)); font-weight: 600; color: var(--bad); }

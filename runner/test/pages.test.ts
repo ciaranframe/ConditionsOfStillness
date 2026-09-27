@@ -24,3 +24,14 @@ test('every page module parses as an ES module', () => {
     assert.equal(r.status, 0, `${f}: ${r.stderr}`);
   }
 });
+
+test('Space on a focused button is left to the button; buttons blur after a click; Admin cues are off while panicked', () => {
+  const ui = readFileSync(join(pub, 'js', 'ui.js'), 'utf8');
+  assert.match(ui, /e\.code === 'Space' && tag === 'BUTTON'\) return/);
+  assert.match(ui, /addEventListener\('click', blur\)/);
+  const admin = readFileSync(join(pub, 'js', 'admin.js'), 'utf8');
+  assert.match(admin, /canNext = online && !panicked/);
+  assert.match(admin, /canBack = online && !panicked/);
+  assert.match(admin, /disabled=\$\{!online \|\| panicked\}/);
+  assert.match(admin, /key=\$\{`\$\{h\.id\}@\$\{h\.ip\}`\}/);
+});

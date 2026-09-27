@@ -112,3 +112,13 @@ test('summarize and dbfs', () => {
   assert.equal(summarize(scenes[2]!, cast), 'fade 2.0 · all');
   assert.equal(dbfs(1), '0 dB'); assert.equal(dbfs(0.2), '−14 dB'); assert.equal(dbfs(0), '−inf'); assert.equal(dbfs(2), '6 dB');
 });
+
+test('PREVIOUS for the first scene is STANDBY with no name', async (t) => {
+  const r = await rig(t);
+  const sticks = new StickIngest({ port: 0, bindAddress: '127.0.0.1', cast: () => cast, onImu: () => {}, onAux: () => {}, log: () => {} });
+  t.after(() => sticks.close());
+  await r.show.next('pedal');
+  const v = buildView({ show: r.show, sticks, airkit: r.airkit, pedal: () => ({ state: 'NO PEDAL' as const, port: null, lastEvent: null }), castError: () => null });
+  assert.equal(v.prev?.id, 'STANDBY');
+  assert.equal(v.prev?.name, '');
+});

@@ -47,13 +47,13 @@ function useHeld() {
   return [held, hold, release];
 }
 
-function SceneList({ view, armed, onTap }) {
+function SceneList({ view, armed, disabled, onTap }) {
   const cur = view.sceneIndex;
   return html`<div class="scene-list">
     ${view.scenes.map((s) => {
       const now = s.index === cur, isNext = s.index === cur + 1;
       const isArmed = armed && armed.kind === 'jump' && armed.index === s.index;
-      return html`<button key=${s.index} class=${`scene-row ${now ? 'now' : ''} ${isArmed ? 'armed' : ''}`}
+      return html`<button key=${s.index} class=${`scene-row ${now ? 'now' : ''} ${isArmed ? 'armed' : ''}`} disabled=${disabled}
           onClick=${() => onTap(s.index)} aria-label=${`Jump to scene ${s.id}`}>
         <div class="row-id">${s.id}</div>
         <div class="row-text">
@@ -73,10 +73,9 @@ function SceneHeader({ view }) {
     <div class="head-group">
       <div class="label">SCENE</div>
       ${standby || !scene
-        ? html`<div class="head-id standby">STANDBY</div><div class="head-name">Before the first cue</div><div class="head-sub">${view.sceneCount} scenes</div>`
-        : html`<div class="head-id">${scene.id}</div><div class="head-name">${scene.name}</div>
-            <div class="head-sub">fade ${scene.fade.toFixed(1)} s · ${scene.n} of ${view.sceneCount}</div>`}
-      ${panicked && html`<div class="head-alert">PANIC</div>`}
+        ? html`<div class="head-id standby">STANDBY</div><div class="head-text"><div class="head-name">Before the first cue</div><div class="head-sub">${view.sceneCount} scenes${panicked ? html` · <span class="head-alert">PANIC</span>` : ''}</div></div>`
+        : html`<div class="head-id">${scene.id}</div><div class="head-text"><div class="head-name">${scene.name}</div>
+            <div class="head-sub">fade ${scene.fade.toFixed(1)} s · ${scene.n} of ${view.sceneCount}${panicked ? html` · <span class="head-alert">PANIC</span>` : ''}</div></div>`}
     </div>
     <div class="head-group next">
       <div class="label">NEXT</div>
@@ -162,7 +161,7 @@ function Engine({ view }) {
     ['airkit', e.online ? `online · ${e.port}` : `offline · ${e.port}`, e.online ? null : TONE.bad],
     ['runner', `${view.standby || !view.scene ? 'standby' : `scene ${view.scene.id}`} · pedal ${view.pedal.state.toLowerCase()}`, view.pedal.state === 'OK' ? null : TONE.warn],
     ['server cpu', e.online ? `${Math.round(e.cpu)}%` : '—', null],
-    ['limiter', e.online ? (e.limiterOn ? 'active' : 'idle') : '—', e.online && e.limiterOn ? TONE.warn : null],
+    ['limiter', e.online ? (e.limiterOn ? 'on' : 'off') : '—', null],
     ['sticks', `${streaming} of 4 streaming`, streaming === 4 ? null : streaming > 0 ? TONE.warn : TONE.bad],
     ['devices', e.online ? String(e.deviceCount) : '—', null],
   ];
@@ -194,7 +193,7 @@ function Heard({ view, online, onAssign }) {
   return html`<div class="panel box heard">
     <div class="label">STICKS HEARD</div>
     <div class="heard-list">
-      ${view.heard.map((h) => html`<div class="heard-row" key=${h.id}>
+      ${view.heard.map((h) => html`<div class="heard-row" key=${`${h.id}@${h.ip}`}>
         <div class="heard-text">
           <div>${h.id} · ${h.ip}</div>
           <div class="dim">${Math.round(h.rateHz)} Hz · ${fmtBatt(h.batteryPct)} · ${h.wrist ? view.wrists[h.wrist].label : 'unmapped'}${h.conflict ? ' · ' : ''}${h.conflict && html`<span class="conflict">conflict</span>`}</div>
@@ -242,8 +241,9 @@ function Admin() {
 
   const standby = view ? view.standby : true;
   const next = view ? view.next : null;
-  const canNext = online && !!next;
-  const canBack = online && !!view && !standby;
+  const panicked = !!view && view.panicked;         // cues are refused while panicked: only RESUME is live
+  const canNext = online && !panicked && !!next;
+  const canBack = online && !panicked && !!view && !standby;
   useKeys((cmd) => { if (cmd.action === 'next' ? canNext : canBack) send(cmd); });
 
   const offline = !online && html`<div class="offline-bar" role="alert">RUNNER OFFLINE — reconnecting</div>`;
@@ -260,8 +260,8 @@ function Admin() {
     <div class="cols">
       <div class="col col-scenes">
         <div class="label">SCENES</div>
-        <${SceneList} view=${view} armed=${armed}
-          onTap=${(i) => { if (online) arm('jump', i, () => send({ type: 'jump', index: i })); }} />
+        <${SceneList} view=${view} armed=${armed} disabled=${!online || panicked}
+          onTap=${(i) => { if (online && !panicked) arm('jump', i, () => send({ type: 'jump', index: i })); }} />
         <${Heard} view=${view} online=${online}
           onAssign=${(h, wrist) => { if (wrist || h.wrist) send(wrist ? { type: 'assignStick', wrist, id: h.id } : { type: 'assignStick', wrist: h.wrist, id: null }); }} />
         <div class="cue-buttons">

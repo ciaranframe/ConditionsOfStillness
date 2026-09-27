@@ -35,7 +35,8 @@ export function Tag({ state, pct }) {
   return html`<span class="tag" style=${`background:${bg}`}>${text}</span>`;
 }
 
-/** Space / → = next, ← = back; ignored while typing in a field. `send` is read through a ref, so it may change every render. */
+/** Space / → = next, ← = back; ignored while typing in a field. Space on a focused BUTTON is left to the button (it would
+ *  otherwise cue twice), and every button gives up focus after a click so Space goes back to cueing. `send` is read through a ref. */
 export function useKeys(send) {
   const latest = useRef(send);
   latest.current = send;
@@ -44,11 +45,14 @@ export function useKeys(send) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const tag = e.target && e.target.tagName;
       if (tag && /^(INPUT|SELECT|TEXTAREA)$/.test(tag)) return;
+      if (e.code === 'Space' && tag === 'BUTTON') return;
       if (e.code === 'Space' || e.code === 'ArrowRight') { e.preventDefault(); if (!e.repeat) latest.current({ type: 'cue', action: 'next' }); }
       else if (e.code === 'ArrowLeft') { e.preventDefault(); if (!e.repeat) latest.current({ type: 'cue', action: 'back' }); }
     };
+    const blur = (e) => { const b = e.target && e.target.closest ? e.target.closest('button') : null; if (b) b.blur(); };
     window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
+    window.addEventListener('click', blur);
+    return () => { window.removeEventListener('keydown', h); window.removeEventListener('click', blur); };
   }, []);
 }
 
