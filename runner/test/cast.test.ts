@@ -71,3 +71,13 @@ test('an empty or non-mapping file is unusable: defaults plus a yaml: error', ()
     assert.ok(errors.length === 1 && errors[0]!.startsWith('yaml:'), JSON.stringify(text));
   }
 });
+
+test('assignStickInFile: re-assigning a stick clears it from its old wrist, keeping that wrist\'s label', () => {
+  const out = assignStickInFile('sticks:\n  ZL: { id: 7, label: A3 }\n  CL: { id: 3, label: B1 }\n', 'CL', '7');
+  const { cast, errors } = parseCast(out);
+  assert.deepEqual(errors, []);
+  assert.equal(cast.sticks.ZL.id, null);
+  assert.equal(cast.sticks.ZL.label, 'A3');
+  assert.equal(cast.sticks.CL.id, '7');
+  assert.equal(cast.sticks.CL.label, 'B1');
+});

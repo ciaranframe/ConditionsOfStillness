@@ -66,6 +66,8 @@ export function parseCast(text: string): { cast: Cast; errors: string[] } {
 
 export function assignStickInFile(text: string, wrist: Wrist, id: string | null, label?: string, ip?: string | null): string {
   const doc = parseDocument(text);
+  // A stick is on one wrist only: re-assigning it clears its old wrist's id (the label stays).
+  if (id !== null) for (const w of WRISTS) if (w !== wrist && idStr(doc.getIn(['sticks', w, 'id'])) === id) doc.setIn(['sticks', w, 'id'], null);
   doc.setIn(['sticks', wrist, 'id'], id);
   if (label !== undefined) doc.setIn(['sticks', wrist, 'label'], label);
   if (ip !== undefined) doc.setIn(['sticks', wrist, 'ip'], ip);
