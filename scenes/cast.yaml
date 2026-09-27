@@ -1,0 +1,20 @@
+# Who is who. Spec §3, §6. Edit by hand or assign heard sticks from the Admin page.
+sticks:
+  # id = the stick's OSC id (the N in /N/IMUFusedData, set with /Config/SetID); label = the
+  # name printed on the stick (shown on the pages); ip = optional check, warns on mismatch.
+  ZL: { id: null, label: ZL, ip: null }
+  ZR: { id: null, label: ZR, ip: null }
+  CL: { id: null, label: CL, ip: null }
+  CR: { id: null, label: CR, ip: null }
+pedal:
+  input: null          # case-insensitive substring of the MIDI port name; null = first port
+  channel: null        # 1..16 or null = any
+  next: { note: 60 }   # or { cc: 64 }; Admin's PEDAL panel shows the last MIDI event received
+  back: { note: 62 }
+  debounceMs: 150
+network:
+  stickPort: 8000      # sticks stream here (/Config/RequestStream <laptop ip> 8000)
+  webPort: 3000        # Perform: http://<laptop>:3000/perform   Admin: /admin
+  airkitHost: 127.0.0.1
+  airkitPort: 57120
+  sourcePort: 9001     # engine device port for slot n = sourcePort + n - 1
