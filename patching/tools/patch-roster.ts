@@ -28,6 +28,11 @@ if (rest.length !== 1) fail(USAGE, 2);
 const name = rest[0]!;
 if (!NAME_RE.test(name)) fail(`name must match ${NAME_RE}: ${name}`, 1);
 
-if (cmd === 'add') rosterAdd(name); else rosterRemove(name);
-console.log(`${cmd === 'add' ? 'added' : 'removed'} ${name}`);
+if (cmd === 'add') {
+  const changed = rosterAdd(name);
+  console.log(changed ? `added ${name}` : `${name} already in roster`);
+} else {
+  const changed = rosterRemove(name);
+  console.log(changed ? `removed ${name}` : `${name} not in roster`);
+}
 process.exit(0);

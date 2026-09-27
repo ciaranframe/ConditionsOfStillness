@@ -2,7 +2,8 @@
 // are shaped right, and a stream that goes quiet still closes cleanly with the rows so far.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { createSocket } from 'node:dgram';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { recordTake } from '../src/take.ts';
@@ -108,5 +109,65 @@ test('id 9 alone (never requested) yields zero rows and the recorder still close
     assert.equal(result.hz, 0);
   } finally {
     sticks.close();
+  }
+});
+
+// --- --wrist (through cast.yaml) ------------------------------------------------------------
+
+function writeCast(out: string): string {
+  const castPath = join(out, 'cast.yaml');
+  writeFileSync(castPath, 'sticks:\n  ZL: { id: 3, label: A3 }\n  ZR: { id: null }\n');
+  return castPath;
+}
+
+test('--wrist resolves the id through cast.yaml and records only the mapped stick', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'cos-take-'));
+  const castPath = writeCast(out);
+  const handle = await recordTake({ port: 0, wrist: 'ZL', label: 'wrist-take', seconds: 0.3, out, castPath });
+  const sticks = startFakeSticks({ target: { host: '127.0.0.1', port: handle.port }, ids: ['3', '9'], hz: 50 });
+  try {
+    const result = await handle.done;
+    assert.ok(result.rows > 0, 'expected rows for the mapped stick (id 3)');
+    const header = JSON.parse(readFileSync(result.path, 'utf8').split('\n')[0]!);
+    assert.equal(header.wrist, 'ZL');
+    assert.equal(header.id, '3');
+    const cols = indexRowCols(readFileSync(join(out, 'INDEX.md'), 'utf8'), 'wrist-take');
+    assert.equal(cols[1], 'ZL'); // the INDEX "wrist" column shows the wrist, not the raw id
+  } finally {
+    sticks.close();
+  }
+});
+
+test('--wrist with no assigned stick id rejects with a clear error naming the wrist', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'cos-take-'));
+  const castPath = writeCast(out);
+  await assert.rejects(
+    recordTake({ port: 0, wrist: 'ZR', label: 'no-id-take', out, castPath }),
+    (err: unknown) => err instanceof Error && /ZR/.test(err.message) && /no stick id/.test(err.message),
+  );
+});
+
+test('an unknown wrist key rejects with a clean Error, not a raw TypeError', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'cos-take-'));
+  const castPath = writeCast(out);
+  await assert.rejects(
+    recordTake({ port: 0, wrist: 'QQ' as unknown as 'ZL', label: 'bad-wrist-take', out, castPath }),
+    (err: unknown) => err instanceof Error && !(err instanceof TypeError) && /QQ/.test(err.message),
+  );
+});
+
+// --- bind failure ----------------------------------------------------------------------------
+
+test('binding an already-used port rejects promptly instead of hanging', async () => {
+  const blocker = createSocket('udp4');
+  await new Promise<void>((resolve) => blocker.bind(0, resolve));
+  const busyPort = (blocker.address() as { port: number }).port;
+  const out = mkdtempSync(join(tmpdir(), 'cos-take-'));
+  try {
+    const start = Date.now();
+    await assert.rejects(recordTake({ port: busyPort, id: '3', label: 'busy-port-take', out }));
+    assert.ok(Date.now() - start < 1000, 'a bind failure should reject promptly, not hang');
+  } finally {
+    blocker.close();
   }
 });

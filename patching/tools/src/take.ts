@@ -11,7 +11,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { flattenPacket, type OscMessage } from '../../../scripts/lib/osc.ts';
 import { parseCast } from '../../../runner/src/cast.ts';
-import type { Wrist } from '../../../runner/src/scenes.ts';
+import { WRISTS, type Wrist } from '../../../runner/src/scenes.ts';
 import { writeAtomic } from './atomic.ts';
 import { repoRoot } from './sc.ts';
 
@@ -49,6 +49,9 @@ Files are \`takes/<label>.take.jsonl\` (gitignored). \`take-record.ts\` appends 
 function resolveId(opts: RecordTakeOptions): string {
   if (opts.id !== undefined) return opts.id;
   if (opts.wrist === undefined) throw new Error('recordTake: need id or wrist');
+  if (!(WRISTS as readonly string[]).includes(opts.wrist)) {
+    throw new Error(`recordTake: unknown wrist ${JSON.stringify(opts.wrist)} (expected one of ${WRISTS.join(', ')})`);
+  }
   const castPath = opts.castPath ?? join(repoRoot(), 'scenes', 'cast.yaml');
   let text: string;
   try {
@@ -58,7 +61,7 @@ function resolveId(opts: RecordTakeOptions): string {
   }
   const { cast } = parseCast(text);
   const id = cast.sticks[opts.wrist].id;
-  if (id === null) throw new Error(`recordTake: wrist ${opts.wrist} has no assigned stick id in ${castPath}`);
+  if (id === null) throw new Error(`recordTake: wrist ${opts.wrist} has no stick id assigned in ${castPath}`);
   return id;
 }
 

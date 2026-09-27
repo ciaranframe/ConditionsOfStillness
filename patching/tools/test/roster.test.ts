@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -82,9 +82,9 @@ test('rosterAdd inserts before the trailing sentinel and is idempotent', () => {
   const root = tempRepo();
   try {
     withRepoRoot(root, () => {
-      rosterAdd('COS_Foo');
+      assert.equal(rosterAdd('COS_Foo'), true);
       assert.deepEqual(rosterList(), ['silence', 'COS_Template', 'COS_Foo', 'silence']);
-      rosterAdd('COS_Foo'); // idempotent: no duplicate
+      assert.equal(rosterAdd('COS_Foo'), false); // idempotent: no duplicate, and reports it didn't write
       assert.deepEqual(rosterList(), ['silence', 'COS_Template', 'COS_Foo', 'silence']);
     });
   } finally {
@@ -97,13 +97,62 @@ test('rosterRemove deletes the named entry and is idempotent, but never index 0 
   try {
     withRepoRoot(root, () => {
       rosterAdd('COS_Foo');
-      rosterRemove('COS_Template');
+      assert.equal(rosterRemove('COS_Template'), true);
       assert.deepEqual(rosterList(), ['silence', 'COS_Foo', 'silence']);
-      rosterRemove('COS_Template'); // idempotent: already gone, no error
+      assert.equal(rosterRemove('COS_Template'), false); // idempotent: already gone, no error, no write
       assert.deepEqual(rosterList(), ['silence', 'COS_Foo', 'silence']);
-      rosterRemove('silence'); // bookends are never removed, even by value
+      assert.equal(rosterRemove('silence'), false); // bookends are never removed, even by value
       assert.deepEqual(rosterList(), ['silence', 'COS_Foo', 'silence']);
     });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rosterAdd on a name already present is a true no-op: file left byte- and mtime-identical', () => {
+  const root = tempRepo();
+  const path = join(root, 'airkit', 'lists', 'list_conditions.sc');
+  try {
+    const before = statSync(path);
+    const beforeText = readFileSync(path, 'utf8');
+    const changed = withRepoRoot(root, () => rosterAdd('COS_Template'));
+    const after = statSync(path);
+    assert.equal(changed, false);
+    assert.equal(after.ino, before.ino);
+    assert.equal(after.mtimeMs, before.mtimeMs);
+    assert.equal(readFileSync(path, 'utf8'), beforeText);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rosterRemove on an absent name is a true no-op: file left byte- and mtime-identical', () => {
+  const root = tempRepo();
+  const path = join(root, 'airkit', 'lists', 'list_conditions.sc');
+  try {
+    const before = statSync(path);
+    const beforeText = readFileSync(path, 'utf8');
+    const changed = withRepoRoot(root, () => rosterRemove('COS_NotThere'));
+    const after = statSync(path);
+    assert.equal(changed, false);
+    assert.equal(after.ino, before.ino);
+    assert.equal(after.mtimeMs, before.mtimeMs);
+    assert.equal(readFileSync(path, 'utf8'), beforeText);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rosterRemove on a bookend-only value is a true no-op: file left byte- and mtime-identical', () => {
+  const root = tempRepo();
+  const path = join(root, 'airkit', 'lists', 'list_conditions.sc');
+  try {
+    const before = statSync(path);
+    const changed = withRepoRoot(root, () => rosterRemove('silence'));
+    const after = statSync(path);
+    assert.equal(changed, false);
+    assert.equal(after.ino, before.ino);
+    assert.equal(after.mtimeMs, before.mtimeMs);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -180,6 +229,38 @@ test('CLI: remove writes the roster and exits 0', () => {
     assert.match(r.out, /removed COS_Template/);
     const text = readFileSync(join(root, 'airkit', 'lists', 'list_conditions.sc'), 'utf8');
     assert.deepEqual(parseRoster(text), ['silence', 'silence']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI: add on an already-present name says so and does not rewrite the file, exit 0', () => {
+  const root = tempRepo();
+  const path = join(root, 'airkit', 'lists', 'list_conditions.sc');
+  try {
+    const before = statSync(path);
+    const r = runCli(root, ['add', 'COS_Template']);
+    assert.equal(r.code, 0);
+    assert.match(r.out, /COS_Template already in roster/);
+    const after = statSync(path);
+    assert.equal(after.ino, before.ino);
+    assert.equal(after.mtimeMs, before.mtimeMs);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI: remove on an absent name says so and does not rewrite the file, exit 0', () => {
+  const root = tempRepo();
+  const path = join(root, 'airkit', 'lists', 'list_conditions.sc');
+  try {
+    const before = statSync(path);
+    const r = runCli(root, ['remove', 'COS_NotThere']);
+    assert.equal(r.code, 0);
+    assert.match(r.out, /COS_NotThere not in roster/);
+    const after = statSync(path);
+    assert.equal(after.ino, before.ino);
+    assert.equal(after.mtimeMs, before.mtimeMs);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -52,20 +52,29 @@ function readRoster(): { header: string; names: string[] } {
 }
 
 /** Idempotent: inserts `name` just before the trailing sentinel unless it is already present
- * anywhere in the roster. Index 0 and the sentinel are never disturbed. Atomic write. */
-export function rosterAdd(name: string): void {
+ * anywhere in the roster. Index 0 and the sentinel are never disturbed. A true no-op (nothing
+ * read back out, no `writeAtomic`, file left byte-for-byte and mtime-for-mtime untouched) when
+ * `name` is already present. Returns whether it actually wrote. */
+export function rosterAdd(name: string): boolean {
   const { header, names } = readRoster();
-  if (!names.includes(name)) names.splice(names.length - 1, 0, name);
+  if (names.includes(name)) return false;
+  names.splice(names.length - 1, 0, name);
   writeAtomic(rosterPath(), renderRoster(names, header));
+  return true;
 }
 
 /** Idempotent: removes every occurrence of `name` except at index 0 or the trailing sentinel
- * position, which are never removed regardless of their value. Atomic write. */
-export function rosterRemove(name: string): void {
+ * position, which are never removed regardless of their value. A true no-op (no `writeAtomic`)
+ * when there is nothing removable — `name` absent entirely, or present only at the bookends.
+ * Returns whether it actually wrote. */
+export function rosterRemove(name: string): boolean {
   const { header, names } = readRoster();
   const last = names.length - 1;
+  const removable = names.some((n, i) => i !== 0 && i !== last && n === name);
+  if (!removable) return false;
   const kept = names.filter((n, i) => i === 0 || i === last || n !== name);
   writeAtomic(rosterPath(), renderRoster(kept, header));
+  return true;
 }
 
 /** The current roster, in order (for `patch-roster.ts list`). */
