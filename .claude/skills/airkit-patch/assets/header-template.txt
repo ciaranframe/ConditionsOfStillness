@@ -1,0 +1,12 @@
+/*
+gestures:    [<words from the profile's gestureWords: sway, shake, tilt, strike, stillness, hold, turn, flip, twist, roll, direction>]
+description: <what it does, for a performer, one sentence — which movement does what>
+internals:   <the architecture: idiom, synths/patterns, what drives what, reveals, 2H partner use>
+sound:       <what you hear, one line>
+pitch:       <where notes come from — the patch's own pitch world; how register/pitchset move it>
+rhythm:      <where time comes from — gesture, a Pdef on a clock, stochastic, none (continuous)>
+family:      <one bare word: drone, bell, membrane, breath, grain, pluck, noise…>
+params:      <key (range, default), … — scene-parameter keys the patch reads — or none>
+samples:     <[slot: "what", …] — one per buffer, matching SHOPPING.md — or none>
+research:    <patching/notes/COS_<Name>.md>
+*/
