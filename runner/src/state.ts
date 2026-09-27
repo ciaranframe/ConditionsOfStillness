@@ -6,6 +6,7 @@ export interface PersistedState {
   sceneIndex: number;                 // -1 = STANDBY
   trims: Record<Wrist, number>;       // dB, Admin faders
   masterDb: number;
+  panicked: boolean;                  // a restart inside the restore window comes back silent
   savedAt: number;                    // Date.now()
 }
 
@@ -18,7 +19,7 @@ export class StateStore {
     try {
       const s = JSON.parse(readFileSync(this.path, 'utf8')) as PersistedState;
       if (typeof s.sceneIndex !== 'number' || typeof s.savedAt !== 'number' || !s.trims) return null;
-      return s;
+      return { ...s, panicked: s.panicked === true };   // files written before the field existed: not panicked
     } catch { return null; }
   }
   save(s: PersistedState): void {

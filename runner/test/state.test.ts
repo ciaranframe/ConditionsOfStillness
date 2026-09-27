@@ -14,15 +14,23 @@ test('load returns null when nothing was saved', () => {
 test('save then load round-trips and leaves no temp file', () => {
   const path = fresh();
   const st = new StateStore(path);
-  st.save({ sceneIndex: 2, trims: { ZL: 0, ZR: -6, CL: 0, CR: 0 }, masterDb: -3, savedAt: 1234 });
-  assert.deepEqual(st.load(), { sceneIndex: 2, trims: { ZL: 0, ZR: -6, CL: 0, CR: 0 }, masterDb: -3, savedAt: 1234 });
+  st.save({ sceneIndex: 2, trims: { ZL: 0, ZR: -6, CL: 0, CR: 0 }, masterDb: -3, panicked: true, savedAt: 1234 });
+  assert.deepEqual(st.load(), { sceneIndex: 2, trims: { ZL: 0, ZR: -6, CL: 0, CR: 0 }, masterDb: -3, panicked: true, savedAt: 1234 });
   assert.deepEqual(readdirSync(join(path, '..')), ['current.json']);
 });
 
 test('load returns null on a corrupt file', () => {
   const path = fresh();
   const st = new StateStore(path);
-  st.save({ sceneIndex: 0, trims: { ZL: 0, ZR: 0, CL: 0, CR: 0 }, masterDb: 0, savedAt: 1 });
+  st.save({ sceneIndex: 0, trims: { ZL: 0, ZR: 0, CL: 0, CR: 0 }, masterDb: 0, panicked: false, savedAt: 1 });
   writeFileSync(path, '{not json');
   assert.equal(st.load(), null);
+});
+
+test('a state file written before panicked existed loads as not panicked', () => {
+  const path = fresh();
+  const st = new StateStore(path);
+  st.save({ sceneIndex: 0, trims: { ZL: 0, ZR: 0, CL: 0, CR: 0 }, masterDb: 0, panicked: false, savedAt: 1 });
+  writeFileSync(path, JSON.stringify({ sceneIndex: 1, trims: { ZL: 0, ZR: 0, CL: 0, CR: 0 }, masterDb: 0, savedAt: 5 }));
+  assert.equal(st.load()?.panicked, false);
 });

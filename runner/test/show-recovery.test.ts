@@ -20,7 +20,8 @@ test('boot restores a recent state and re-pushes in the spec order', async (t) =
   assert.ok(Math.abs(Number(zr[1]) - 0.501) < 0.01, 'ZR level includes the −6 dB trim');
   assert.ok(r.loads().some(([s, p]) => s === 1 && p === 'COS_A'), 'B: ZL live COS_A on slot 1');
   assert.ok(r.loads().some(([s, p]) => s === 5 && p === 'COS_B'));
-  assert.ok(r.loads().some(([s, p]) => s === 9 && p === 'silence'));
+  assert.deepEqual(r.loads().filter(([s]) => s === 9), [], 'slot 9 already on silence on a fresh engine: no load (re-push if different)');
+  assert.equal(r.fake.devices.get(r.port(9))?.name, 'silence');
   assert.ok(r.loads().some(([s, p]) => s === 6 && p === 'COS_X2H'), 'C preloaded for CL');
   r.close();
 });
@@ -208,5 +209,88 @@ scenes:
   assert.equal(r.show.panicked, false);
   assert.equal(r.show.wrists.ZL.live.patch, 'COS_B');
   assert.ok(r.loads(m2).some(([s, p]) => (s === 1 || s === 2) && p === 'COS_B'));
+  r.close();
+});
+
+test('cues are refused while panicked; only resume clears the panic', async (t) => {
+  const r = await rig(t);
+  await r.show.next('pedal'); await sleep(150);
+  r.show.panic();
+  await sleep(30);
+  const m = r.mark();
+  assert.equal(await r.show.next('pedal'), 'noop');
+  assert.equal(await r.show.jump(2, 'admin'), 'noop');
+  assert.equal(await r.show.back('key'), 'noop');
+  await sleep(50);
+  assert.equal(r.show.panicked, true);
+  assert.equal(r.show.sceneIndex, 0);
+  assert.deepEqual(r.loads(m), [], 'no loadPersonality while panicked');
+  assert.equal(r.lines.filter((l) => /cue ignored — PANIC, resume from Admin/.test(l)).length, 3, 'one line per press');
+  assert.equal(r.store.load()?.panicked, true, 'panic persisted');
+  await r.show.resume();
+  await sleep(150);
+  assert.equal(r.show.panicked, false);
+  assert.equal(r.store.load()?.panicked, false);
+  assert.equal(await r.show.next('pedal'), 'done');
+  assert.equal(r.show.sceneIndex, 1);
+  r.close();
+});
+
+test('a restart inside the window restores PANIC: every wrist silent, nothing but silence loaded', async (t) => {
+  const r = await rig(t, { state: { sceneIndex: 1, trims, masterDb: 0, panicked: true, savedAt: Date.now() - 5_000 } });
+  assert.equal(r.show.panicked, true);
+  assert.equal(r.show.sceneIndex, 1);
+  for (const w of ['ZL', 'ZR', 'CL', 'CR'] as const) { assert.deepEqual(r.show.wrists[w].live, SILENCE); assert.equal(r.show.wrists[w].standby, null); }
+  assert.deepEqual(r.loads().filter(([, p]) => p !== 'silence'), [], 'no sound loaded');
+  for (const d of r.fake.devices.values()) assert.equal(d.name, 'silence');
+  assert.ok(r.lines.some((l) => /restored in PANIC — resume from Admin/.test(l)));
+  assert.equal(await r.show.next('pedal'), 'noop');
+  await r.show.resume();
+  await sleep(150);
+  assert.ok(r.loads().some(([s, p]) => (s === 5 || s === 6) && p === 'COS_B'), 'resume brings scene B back');
+  r.close();
+});
+
+test('the heartbeat keeps savedAt fresh through a long scene', async (t) => {
+  const r = await rig(t, { heartbeatMs: 50 });
+  await sleep(80);
+  const a = r.store.load()?.savedAt;
+  assert.ok(typeof a === 'number');
+  await sleep(150);
+  assert.ok(r.store.load()!.savedAt > a!, 'savedAt advanced with no change');
+  r.close();
+});
+
+test('reconcile does nothing while the engine is offline', async (t) => {
+  const r = await rig(t);
+  await r.show.next('pedal'); await sleep(150);
+  await r.fake.stop();
+  await sleep(250);                 // > 3 polls of 50 ms → offline
+  assert.equal(r.airkit.online, false);
+  r.airkit.emit('seats', { [r.port(1)]: 'silence', [r.port(2)]: 'silence' });   // a booting engine's seats: drifted from the model
+  r.show.reconcile({ [r.port(1)]: 'COS_B', [r.port(2)]: 'silence' });
+  assert.deepEqual(r.lines.filter((l) => /reloading|giving up/.test(l)), []);
+  r.close();
+});
+
+test('re-push over a healthy engine loads nothing whose seat already matches; levels and xfades still sent', async (t) => {
+  const r = await rig(t);
+  await r.show.next('pedal'); await sleep(300);   // → A, settled, B preloaded
+  const m = r.mark();
+  await r.show.pushAll();
+  await sleep(100);
+  assert.deepEqual(r.loads(m), [], 'no loadPersonality for matching seats');
+  assert.ok(r.lines.some((l) => /slot 1 already on COS_A|slot 2 already on COS_A/.test(l)));
+  assert.equal(r.sends('/airkit/cos/level', m).filter(([w]) => w !== 'audition').length, 4);
+  assert.equal(r.sends('/airkit/cos/xfade', m).length, 4);
+  assert.equal(r.sends('/airkit/cos/master', m).length, 1);
+  assert.ok(r.sends('/airkit/cos/params', m).length >= 9);
+  // a seat that drifted is still re-pushed
+  const zlLive = r.port(1 + r.show.wrists.ZL.liveSlot);
+  r.fake.devices.get(zlLive)!.name = 'silence';
+  const m2 = r.mark();
+  await r.show.pushAll();
+  await sleep(100);
+  assert.deepEqual(r.loads(m2), [[1 + r.show.wrists.ZL.liveSlot, 'COS_A']]);
   r.close();
 });

@@ -37,6 +37,7 @@ export class AirkitLink extends EventEmitter {
   private _levels: Levels | null = null;
   private _lastStatusAt = -Infinity;
   private _seatsAsked = 0;              // getSeats requests sent so far: a seats reply answers one sent before it
+  private _seatsReplied = 0;            // seats replies received so far (in order, so reply n answers request n or later)
   private sourcePort: number;
   private clock: () => number;
   private log: (m: string) => void;
@@ -65,6 +66,7 @@ export class AirkitLink extends EventEmitter {
   get levels() { return this._levels; }
   get lastStatusAt() { return this._lastStatusAt; }
   get seatsAsked() { return this._seatsAsked; }
+  get seatsReplied() { return this._seatsReplied; }
   get host() { return this.opts.host; }
   get port() { return this.opts.port; }
 
@@ -94,6 +96,7 @@ export class AirkitLink extends EventEmitter {
   private tick() {
     if (this._online && this.clock() - this._lastStatusAt > this.offlineMs) {
       this._online = false;
+      this._seats = {}; this._status = null;   // what a dead engine last said is not what a restarted one will hold
       this.log('[airkit] offline (no status reply)');
       this.emit('offline');
     }
@@ -116,7 +119,7 @@ export class AirkitLink extends EventEmitter {
       else if (m.address === '/airkit/seats/reply') {
         const s: Record<number, string> = {};
         for (let i = 0; i + 1 < m.args.length; i += 2) s[Number(m.args[i])] = String(m.args[i + 1]);
-        this._seats = s;
+        this._seats = s; this._seatsReplied++;
         this.emit('seats', s);
       } else if (m.address === '/airkit/cos/status/reply') {
         try { this._status = JSON.parse(String(m.args[0])) as EngineStatus; } catch { continue; }

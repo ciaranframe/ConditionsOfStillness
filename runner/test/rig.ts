@@ -24,7 +24,7 @@ scenes:
 `;
 const cast = parseCast('sticks: { ZL: { id: 1, label: A3 }, ZR: { id: 2, label: A4 }, CL: { id: 3, label: B1 }, CR: { id: 4, label: B2 } }\n').cast;
 
-export async function rig(t: TestContext, opts: { readyDelayMs?: number; readyTimeoutMs?: number; scenesText?: string; state?: object | null } = {}) {
+export async function rig(t: TestContext, opts: { readyDelayMs?: number; readyTimeoutMs?: number; scenesText?: string; state?: object | null; heartbeatMs?: number } = {}) {
   const fake = await fakeAirkit({ roster: ROSTER, readyDelayMs: opts.readyDelayMs ?? 10 });
   const airkit = new AirkitLink({ host: '127.0.0.1', port: fake.port, sourcePort: 0, pollMs: 50, log: () => {} });
   const store = new StateStore(join(mkdtempSync(join(tmpdir(), 'cos-show-')), 'current.json'));
@@ -33,7 +33,7 @@ export async function rig(t: TestContext, opts: { readyDelayMs?: number; readyTi
   let closed = false;
   const close = () => { if (closed) return; closed = true; show.dispose(); airkit.close(); fake.close(); };
   t.after(close);   // a failed assertion must not leave sockets open and hang the run
-  const show = new Show({ scenes: parseScenes(opts.scenesText ?? SCENES, ROSTER).file!.scenes, airkit, cast: () => cast, store, log: (m, l) => lines.push(`${l ?? 'info'} ${m}`), readyTimeoutMs: opts.readyTimeoutMs ?? 1000, unloadGraceMs: 10 });
+  const show = new Show({ scenes: parseScenes(opts.scenesText ?? SCENES, ROSTER).file!.scenes, airkit, cast: () => cast, store, log: (m, l) => lines.push(`${l ?? 'info'} ${m}`), readyTimeoutMs: opts.readyTimeoutMs ?? 1000, unloadGraceMs: 10, heartbeatMs: opts.heartbeatMs });
   await airkit.start();
   await show.boot();
   for (let i = 0; i < 50 && !airkit.online; i++) await sleep(20);

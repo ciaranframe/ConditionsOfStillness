@@ -23,10 +23,15 @@ test('goes online on the first status reply, learns roster and seats, offline af
   await sleep(150);
   assert.equal(link.online, true);
   assert.deepEqual(link.roster, ROSTER);
+  assert.equal(await link.ensureDevices(1000), true);
+  assert.equal(Object.keys(link.seats).length, 9);
+  assert.ok(link.status);
   await fake.stop();
   await sleep(60 * 3 + 150);
   assert.equal(link.online, false);
   assert.deepEqual(events, ['online', 'offline']);
+  assert.deepEqual(link.seats, {}, 'seats cleared when the engine goes offline');
+  assert.equal(link.status, null, 'status cleared when the engine goes offline');
   await fake.start();
   await sleep(200);
   assert.equal(link.online, true);
