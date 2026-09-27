@@ -117,6 +117,17 @@ Full flags and exit codes: `patching/tools/README.md`. The audition uses a runni
 57120 if one answers, else boots a private one on 57130/57131; next to a live runner it never
 touches slots 1–8, but it plays through the real output.
 
+**Recording a take.** `npm run take:record -- <label> --wrist ZL [--seconds 30] [--what "…"]`
+records that wrist's stick (its id from `scenes/cast.yaml`) from UDP **8001**. The sticks
+normally stream to the runner on 8000, so either repoint one stick at 8001 for the take — from
+sclang, as in `airkit/configureAirStickOSC.sc`:
+`NetAddr("<stick ip>", 8888).sendMsg("/Config/RequestStream", <laptop ip as four numbers>, 8001)`,
+and back to 8000 afterwards (while repointed, the runner does not hear that wrist) — or stop the
+runner and record with `--port 8000`. If nothing arrives within 3 s the recorder says where it is
+listening; a take with no packets writes nothing and exits 1. Labels are letters, digits and
+`_ . -`; an existing label is refused unless `--force`. Takes are listed in `takes/INDEX.md` and
+replayed with `npm run patch:audition -- <Name> --take <label>`.
+
 | Path | What |
 |---|---|
 | `patching/profile.md` | the piece profile the skill and lint read |

@@ -6,6 +6,12 @@
 // Stops on `seconds` elapsed, on `stop()` (the CLI wires this to SIGINT), or — when the stream
 // goes quiet for `streamEndMs` (default 5 s) after at least one packet — closes cleanly with the
 // rows so far and notes "(stream ended)" in the INDEX row (Review Focus 4).
+//
+// Safeguards: the label must match LABEL_RE (it is a file name and an INDEX.md table cell); an
+// existing take of that label is refused unless `force` (which replaces the file and its INDEX
+// row); if no packet has arrived `noPacketWarnMs` (default 3 s) after binding, `warn` says where
+// it is listening and how to repoint a stick; a take that ends with 0 rows writes nothing — no
+// take file, no INDEX row — and reports `written: false`.
 import { createSocket } from 'node:dgram';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -29,10 +35,25 @@ export interface RecordTakeOptions {
   /** How long the stream may go quiet (after at least one packet) before closing cleanly.
    * Default 5000ms; tests inject something shorter so they don't have to wait 5 real seconds. */
   streamEndMs?: number;
+  /** Replace an existing take (and its INDEX.md row) of the same label. */
+  force?: boolean;
+  /** Called once if no packet has arrived this long after binding (default 3000 ms). */
+  noPacketWarnMs?: number;
+  warn?: (message: string) => void;
 }
 
 export type StopReason = 'seconds' | 'stop' | 'stream-ended';
-export interface TakeResult { path: string; rows: number; reason: StopReason; hz: number }
+/** `written` is false (and neither the take file nor an INDEX row was written) when the take
+ * ended with 0 rows. */
+export interface TakeResult { path: string; rows: number; reason: StopReason; hz: number; written: boolean }
+
+/** A take label: letters, digits, `_`, `.`, `-` (so it is safe as a file name and as a table
+ * cell — no `|`, no `/`). */
+export const LABEL_RE = /^[A-Za-z0-9_.-]+$/;
+
+export function takePath(label: string, out = join(repoRoot(), 'takes')): string {
+  return join(out, `${label}.take.jsonl`);
+}
 export interface TakeHandle { port: number; stop: () => void; done: Promise<TakeResult> }
 
 interface Row { t: number; a: [number, number, number]; q: [number, number, number, number] }
@@ -65,18 +86,31 @@ function resolveId(opts: RecordTakeOptions): string {
   return id;
 }
 
-function appendIndexRow(indexPath: string, row: string): void {
+/** Appends `row`; with `replaceLabel`, first drops any existing row for that label (a forced
+ * re-record keeps one row per take). */
+function appendIndexRow(indexPath: string, row: string, replaceLabel?: string): void {
   let text = existsSync(indexPath) ? readFileSync(indexPath, 'utf8') : INDEX_HEADER;
+  if (replaceLabel !== undefined) {
+    text = text.split('\n').filter((l) => !l.startsWith(`| ${replaceLabel} |`)).join('\n');
+  }
   if (!text.endsWith('\n')) text += '\n';
   writeAtomic(indexPath, text + row + '\n');
 }
 
 export async function recordTake(opts: RecordTakeOptions): Promise<TakeHandle> {
+  if (!LABEL_RE.test(opts.label)) {
+    throw new Error(`recordTake: label ${JSON.stringify(opts.label)} must match ${LABEL_RE} (letters, digits, _ . -)`);
+  }
+  const outDir = opts.out ?? join(repoRoot(), 'takes');
+  const path = takePath(opts.label, outDir);
+  const existed = existsSync(path);
+  if (existed && !opts.force) {
+    throw new Error(`recordTake: a take labelled ${opts.label} already exists (${path}); pick another label or pass force (--force)`);
+  }
   const id = resolveId(opts);
   const clock = opts.clock ?? Date.now;
   const streamEndMs = opts.streamEndMs ?? 5000;
-  const outDir = opts.out ?? join(repoRoot(), 'takes');
-  const takePath = join(outDir, `${opts.label}.take.jsonl`);
+  const warn = opts.warn ?? ((m: string) => console.error(`take-record: ${m}`));
   const indexPath = join(outDir, 'INDEX.md');
   const expectedAddress = `/${id}/IMUFusedData`;
 
@@ -98,6 +132,12 @@ export async function recordTake(opts: RecordTakeOptions): Promise<TakeHandle> {
   let finished = false;
   let secondsTimer: NodeJS.Timeout | undefined;
   let watchdog: NodeJS.Timeout | undefined;
+  const noPacketTimer: NodeJS.Timeout = setTimeout(() => {
+    if (!finished && rows.length === 0) {
+      warn(`waiting for ${expectedAddress} on udp ${boundPort} — is the stick streaming here? (repoint with /Config/RequestStream, or stop the runner)`);
+    }
+  }, opts.noPacketWarnMs ?? 3000);
+  noPacketTimer.unref();
   const { promise: done, resolve: resolveDone } = Promise.withResolvers<TakeResult>();
 
   const armWatchdog = () => {
@@ -111,6 +151,7 @@ export async function recordTake(opts: RecordTakeOptions): Promise<TakeHandle> {
     finished = true;
     if (secondsTimer) clearTimeout(secondsTimer);
     if (watchdog) clearTimeout(watchdog);
+    clearTimeout(noPacketTimer);
     sock.close();
 
     const elapsedSec = Math.max(0, (clock() - startedAtMs) / 1000);
@@ -120,17 +161,23 @@ export async function recordTake(opts: RecordTakeOptions): Promise<TakeHandle> {
       hz = durationSec > 0 ? Math.round((rows.length - 1) / durationSec) : rows.length;
     }
 
+    if (rows.length === 0) {
+      // nothing heard: no take file, no INDEX row (an existing take of this label is untouched)
+      resolveDone({ path, rows: 0, reason, hz: 0, written: false });
+      return;
+    }
+
     const header = { label: opts.label, wrist: opts.wrist ?? null, id, startedAt: new Date(startedAtMs).toISOString(), hz };
     const lines = [JSON.stringify(header), ...rows.map((r) => JSON.stringify(r))];
-    writeAtomic(takePath, lines.join('\n') + '\n');
+    writeAtomic(path, lines.join('\n') + '\n');
 
     const date = header.startedAt.slice(0, 10);
-    const whatNote = opts.what ?? '';
+    const whatNote = (opts.what ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');   // a table cell
     const what = reason === 'stream-ended' ? `${whatNote}${whatNote ? ' ' : ''}(stream ended)` : whatNote;
     const who = opts.wrist ?? id;
-    appendIndexRow(indexPath, `| ${opts.label} | ${who} | ${date} | ${elapsedSec.toFixed(1)} | ${what} |`);
+    appendIndexRow(indexPath, `| ${opts.label} | ${who} | ${date} | ${elapsedSec.toFixed(1)} | ${what} |`, existed ? opts.label : undefined);
 
-    resolveDone({ path: takePath, rows: rows.length, reason, hz });
+    resolveDone({ path, rows: rows.length, reason, hz, written: true });
   }
 
   sock.on('message', (buf) => {

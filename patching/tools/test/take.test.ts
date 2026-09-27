@@ -2,14 +2,17 @@
 // are shaped right, and a stream that goes quiet still closes cleanly with the rows so far.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createSocket } from 'node:dgram';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { recordTake } from '../src/take.ts';
 import { startFakeSticks } from '../../../runner/test/fake-sticks.ts';
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const CLI = join(dirname(fileURLToPath(import.meta.url)), '..', 'take-record.ts');
 
 function indexRowCols(indexText: string, label: string): string[] {
   const line = indexText.trim().split('\n').find((l) => l.includes(`| ${label} |`));
@@ -98,18 +101,107 @@ test('when the stream stops, the recorder closes after the (shortened) quiet tim
   assert.match(cols[4]!, /\(stream ended\)/);
 });
 
-test('id 9 alone (never requested) yields zero rows and the recorder still closes on seconds', async () => {
+test('id 9 alone (never requested) yields zero rows: closes on seconds, writes neither the take nor an INDEX row', async () => {
   const out = mkdtempSync(join(tmpdir(), 'cos-take-'));
-  const handle = await recordTake({ port: 0, id: '3', label: 'no-match-take', seconds: 0.3, out });
+  const handle = await recordTake({ port: 0, id: '3', label: 'no-match-take', seconds: 0.3, out, warn: () => {} });
   const sticks = startFakeSticks({ target: { host: '127.0.0.1', port: handle.port }, ids: ['9'], hz: 50 });
   try {
     const result = await handle.done;
     assert.equal(result.reason, 'seconds');
     assert.equal(result.rows, 0);
     assert.equal(result.hz, 0);
+    assert.equal(result.written, false);
+    assert.equal(existsSync(join(out, 'no-match-take.take.jsonl')), false);
+    assert.equal(existsSync(join(out, 'INDEX.md')), false);
   } finally {
     sticks.close();
   }
+});
+
+test('no packet within the warning window: warns once, naming the address, the port and how to repoint', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'cos-take-'));
+  const warnings: string[] = [];
+  const handle = await recordTake({ port: 0, id: '3', label: 'silent-take', seconds: 0.4, out, noPacketWarnMs: 100, warn: (m) => warnings.push(m) });
+  const result = await handle.done;
+  assert.equal(result.written, false);
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0], `waiting for /3/IMUFusedData on udp ${handle.port} — is the stick streaming here? (repoint with /Config/RequestStream, or stop the runner)`);
+});
+
+test('packets arriving before the warning window: no warning', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'cos-take-'));
+  const warnings: string[] = [];
+  const handle = await recordTake({ port: 0, id: '3', label: 'heard-take', seconds: 0.5, out, noPacketWarnMs: 300, warn: (m) => warnings.push(m) });
+  const sticks = startFakeSticks({ target: { host: '127.0.0.1', port: handle.port }, ids: ['3'], hz: 50 });
+  try {
+    const result = await handle.done;
+    assert.ok(result.written);
+    assert.deepEqual(warnings, []);
+  } finally {
+    sticks.close();
+  }
+});
+
+test('an existing label is refused; force replaces the take and keeps one INDEX row for it', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'cos-take-'));
+  const first = await recordTake({ port: 0, id: '3', label: 'again', seconds: 0.3, out, what: 'first' });
+  let sticks = startFakeSticks({ target: { host: '127.0.0.1', port: first.port }, ids: ['3'], hz: 50 });
+  await first.done;
+  sticks.close();
+  const before = readFileSync(join(out, 'again.take.jsonl'), 'utf8');
+
+  await assert.rejects(recordTake({ port: 0, id: '3', label: 'again', seconds: 0.3, out }), /already exists/);
+  assert.equal(readFileSync(join(out, 'again.take.jsonl'), 'utf8'), before);
+
+  const second = await recordTake({ port: 0, id: '3', label: 'again', seconds: 0.3, out, what: 'second', force: true });
+  sticks = startFakeSticks({ target: { host: '127.0.0.1', port: second.port }, ids: ['3'], hz: 50 });
+  try {
+    const r = await second.done;
+    assert.ok(r.written);
+    assert.notEqual(readFileSync(join(out, 'again.take.jsonl'), 'utf8'), before);
+    const rows = readFileSync(join(out, 'INDEX.md'), 'utf8').split('\n').filter((l) => l.startsWith('| again |'));
+    assert.equal(rows.length, 1, rows.join('\n'));
+    assert.match(rows[0]!, /\| second \|$/);
+  } finally {
+    sticks.close();
+  }
+});
+
+test('labels outside [A-Za-z0-9_.-] are rejected before binding', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'cos-take-'));
+  for (const label of ['a|b', '../escape', 'with space', '', 'x/y']) {
+    await assert.rejects(recordTake({ port: 0, id: '3', label, seconds: 0.1, out }), /label/, label);
+  }
+});
+
+// --- CLI -------------------------------------------------------------------------------------
+
+function runCli(args: string[]) {
+  const r = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8' });
+  return { code: r.status, out: r.stdout, err: r.stderr };
+}
+
+test('CLI: 0 rows exits 1 and writes nothing', () => {
+  const out = mkdtempSync(join(tmpdir(), 'cos-take-'));
+  const r = runCli(['nothing-heard', '--id', '3', '--port', '0', '--seconds', '0.3', '--out', out]);
+  assert.equal(r.code, 1, r.err);
+  assert.match(r.err, /no packets/);
+  assert.equal(existsSync(join(out, 'nothing-heard.take.jsonl')), false);
+  assert.equal(existsSync(join(out, 'INDEX.md')), false);
+});
+
+test('CLI: an existing label exits 1 unless --force; a bad label exits 2', () => {
+  const out = mkdtempSync(join(tmpdir(), 'cos-take-'));
+  writeFileSync(join(out, 'taken.take.jsonl'), '{"label":"taken"}\n');
+  const r = runCli(['taken', '--id', '3', '--port', '0', '--seconds', '0.2', '--out', out]);
+  assert.equal(r.code, 1);
+  assert.match(r.err, /already exists.*--force/);
+  // --force gets past the check (then records nothing here: exit 1 for 0 rows, old file untouched)
+  const forced = runCli(['taken', '--id', '3', '--port', '0', '--seconds', '0.2', '--out', out, '--force']);
+  assert.equal(forced.code, 1);
+  assert.match(forced.err, /no packets/);
+  assert.equal(readFileSync(join(out, 'taken.take.jsonl'), 'utf8'), '{"label":"taken"}\n');
+  assert.equal(runCli(['bad|label', '--id', '3', '--out', out]).code, 2);
 });
 
 // --- --wrist (through cast.yaml) ------------------------------------------------------------
