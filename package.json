@@ -4,9 +4,16 @@
   "type": "module",
   "engines": { "node": ">=22.18" },
   "scripts": {
-    "test": "node --test \"scripts/test/*.test.ts\" \"runner/test/*.test.ts\"",
+    "test": "node --test \"scripts/test/*.test.ts\" \"runner/test/*.test.ts\" \"patching/tools/test/*.test.ts\"",
     "setup:check": "node scripts/setup.ts --check",
     "smoke": "node scripts/engine-smoke.ts",
-    "smoke:runner": "node scripts/runner-smoke.ts"
+    "smoke:runner": "node scripts/runner-smoke.ts",
+    "patch:compile": "patching/tools/patch-compile.sh",
+    "patch:lint": "node patching/tools/patch-lint.ts",
+    "patch:audition": "node patching/tools/patch-audition.ts",
+    "patch:roster": "node patching/tools/patch-roster.ts",
+    "corpus:mine": "node patching/tools/corpus-mine.ts",
+    "take:record": "node patching/tools/take-record.ts",
+    "samples:check": "node patching/tools/samples-check.ts"
   }
 }
