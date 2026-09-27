@@ -46,10 +46,11 @@ function lanIp(): string {
   for (const list of Object.values(networkInterfaces())) for (const a of list ?? []) if (a.family === 'IPv4' && !a.internal) return a.address;
   return 'localhost';
 }
-function readCast(text: string | null, path: string): { cast: Cast; error: string | null } {
-  if (text === null) return { cast: structuredClone(DEFAULT_CAST), error: `cannot read ${path}; defaults used` };
+/** `unusable`: the file could not be read or is not YAML at all, so `cast` is only the defaults. */
+function readCast(text: string | null, path: string): { cast: Cast; error: string | null; unusable: boolean } {
+  if (text === null) return { cast: structuredClone(DEFAULT_CAST), error: `cannot read ${path}`, unusable: true };
   const r = parseCast(text);
-  return { cast: r.cast, error: r.errors.length ? r.errors.join('\n') : null };
+  return { cast: r.cast, error: r.errors.length ? r.errors.join('\n') : null, unusable: r.errors.some((e) => e.startsWith('yaml:')) };
 }
 
 export async function main(overrides: Partial<MainOptions> = {}): Promise<Running> {
@@ -62,7 +63,7 @@ export async function main(overrides: Partial<MainOptions> = {}): Promise<Runnin
   // cast.yaml: the getters below read `cast` live, so a reload is just a reassignment.
   let castText = readOrNull(castPath);
   let { cast, error: castError } = readCast(castText, castPath);
-  if (castError) log.line(`cast.yaml: ${castError}`, 'error');
+  if (castError) log.line(`cast.yaml: ${castError}${castText === null ? '; defaults used' : ''}`, 'error');
   const net = cast.network;
   const statePath = overrides.statePath ?? process.env.COS_STATE_PATH ?? join(repoRoot, 'runner', 'state', 'current.json');
   const airkitHost = overrides.airkitHost ?? process.env.COS_AIRKIT_HOST ?? net.airkitHost;
@@ -101,25 +102,39 @@ export async function main(overrides: Partial<MainOptions> = {}): Promise<Runnin
     const text = readOrNull(castPath);
     if (text === castText) return;
     castText = text;
-    ({ cast, error: castError } = readCast(text, castPath));
-    if (castError) log.line(`cast.yaml reloaded with errors: ${castError}`, 'error');
-    else log.line('cast.yaml reloaded');
+    const r = readCast(text, castPath);
+    castError = r.error;
+    // A file that cannot be read or parsed keeps the previous cast: a mid-show typo must not unmap every stick.
+    if (r.unusable) log.line(`cast.yaml unusable — keeping the previous cast: ${castError}`, 'error');
+    else {
+      cast = r.cast;
+      if (castError) log.line(`cast.yaml reloaded with errors: ${castError}`, 'error');
+      else log.line('cast.yaml reloaded');
+    }
     server.broadcast();
   };
   const reloadScenes = async (force: boolean): Promise<void> => {
     const text = readOrNull(scenesPath);
     const textChanged = text !== scenesText;
     if (!force && !textChanged) return;
-    scenesText = text;
     const roster = liveRoster(); validatedRoster = JSON.stringify(roster);
     const r = parseScenesText(text, roster);
     if (r.file) {
       const hadError = show.scenesError !== null;
       show.scenesError = null;
       // Same text, already loaded: a re-validation that passes has nothing to replace.
-      if (textChanged || hadError) await show.replaceScenes(r.file.scenes);
+      if (textChanged || hadError) {
+        try { await show.replaceScenes(r.file.scenes); }
+        catch (e) {   // scenesText stays old, so saving the same text again retries
+          show.scenesError = `reload failed: ${e instanceof Error ? e.message : String(e)}`;
+          log.line(`scenes file: ${show.scenesError}`, 'error'); server.broadcast();
+          return;
+        }
+      }
+      scenesText = text;
       log.line(`scenes file: ${r.file.scenes.length} scenes${textChanged || hadError ? '' : ', valid against the engine roster'}`);
     } else {
+      scenesText = text;
       show.scenesError = r.errors.join('\n');
       log.line(`scenes file has errors — keeping the previous ${show.scenes.length} scenes:\n${show.scenesError}`, 'error');
       server.broadcast();
@@ -175,11 +190,13 @@ export async function main(overrides: Partial<MainOptions> = {}): Promise<Runnin
     } catch (e) { log.line(`[watch] cannot watch ${dir}: ${e instanceof Error ? e.message : String(e)} — edits need a restart`, 'warn'); }
   }
 
+  let closed = false;
   const close = async (): Promise<void> => {
+    if (closed) return; closed = true;
     if (debounce) clearTimeout(debounce);
     for (const w of watchers) w.close();
+    await reloading;   // let an in-flight reload finish against live objects
     server.close(); sticks.close(); pedal.close(); show.dispose(); airkit.close();
-    await reloading;
   };
 
   try {

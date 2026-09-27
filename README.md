@@ -54,8 +54,8 @@ this one; `./setup.sh --check` reports whether the mirror is reachable.
   `COS_STICK_PORT`, `COS_WEB_PORT`, `COS_SOURCE_PORT`, `COS_AIRKIT_HOST`, `COS_STATE_PATH`
   override the runner's ports and state file.
 - `npm --prefix runner run dev:fake` — the runner against a fake engine (port 57140) and four fake
-  sticks (ids 1–4), to look at the pages without SuperCollider or sticks. Assigning sticks from
-  Admin writes `scenes/cast.yaml`; revert it afterwards.
+  sticks (ids 1–4), to look at the pages without SuperCollider or sticks. It uses a temp copy of
+  `cast.yaml` (path printed at start), so stick assignments made there leave the repo untouched.
 - `node scripts/engine-ping.ts` — prints roster, seats, state and `[COS]` status of a running engine.
 - `npm run smoke` — boots a private engine on ports 57130/57131, drives it with fake sticks and
   checks the `[COS]` contract end to end (audible for ~10 s). Safe while a real engine runs.
