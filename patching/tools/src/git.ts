@@ -37,3 +37,11 @@ export function readBlob(repo: string, blob: string): string {
   });
   return decoder.decode(buf); // invalid UTF-8 becomes U+FFFD
 }
+
+// The commit a ref points at, recorded in the index so the committed outputs say what was mined.
+export function resolveCommit(repo: string, ref: string): string {
+  return execFileSync('git', ['-C', repo, 'rev-parse', '--verify', `${ref}^{commit}`], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+}

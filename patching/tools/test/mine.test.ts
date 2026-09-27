@@ -18,6 +18,9 @@ m.accelMassFilteredAttack = 0.98;
 ~next = { |d| if (m.accelMass > 0.3) { "hit".postln } };
 `;
 
+const SPACED = 'Pdef(\\a, Pbind()); Ndef(\\b, { WhiteNoise.ar * 0.1 });\n';
+const A_SRC = '~init = { Synth.after(s, \\a) };\n';
+
 function git(repo: string, ...args: string[]): string {
   return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
 }
@@ -37,11 +40,12 @@ function fixture(): string {
   git(repo, 'config', 'user.email', 't@example.com');
   git(repo, 'config', 'user.name', 't');
   put(repo, 'personalities/Shared.sc', SHARED);
-  put(repo, 'personalities/Spaced Name.sc', 'Pdef(\\a, Pbind()); Ndef(\\b, { WhiteNoise.ar * 0.1 });\n');
+  put(repo, 'personalities/Spaced Name.sc', SPACED);
   put(repo, 'personalities/Foo.sc', '~init = { Buffer.read(s, "x.wav") };\n');
   put(repo, 'personalities/Foo copy.sc', '~init = { Buffer.read(s, "x.wav") };\n');
   put(repo, 'personalities/Bar.sc', '// bar\n');
   put(repo, 'personalities/Bar 2.sc', '// bar two\n');
+  put(repo, 'personalities/A.sc', A_SRC);
   put(repo, 'personalities/notes.txt', 'not sc\n');
   put(repo, 'personalities/sc_osx_standalone-3.7.0-template/Inner.sc', '// vendored\n');
   put(repo, 'synths/Tone.sc', 'SynthDef(\\tone, { Out.ar(0, LPF.ar(Saw.ar(220), 800)) }).add;\n');
@@ -51,6 +55,8 @@ function fixture(): string {
   git(repo, 'rm', '-q', '-rf', '.');
   put(repo, 'personalities/Shared.sc', SHARED);
   put(repo, 'personalities/Only2.sc', '~onRoomState = { |s| };\n');
+  put(repo, 'personalities/Spaced Name.sc', SPACED);
+  put(repo, 'personalities/Sub Dir/A copy.sc', A_SRC); // same blob as one's A.sc, other path and name
   git(repo, 'add', '-A');
   git(repo, 'commit', '-q', '-m', 'two');
   return repo;
@@ -61,6 +67,7 @@ test('listTree parses NUL output, keeps spaced names, filters .sc and excludes t
   const files = listTree(repo, 'one', ['personalities', 'synths']);
   const paths = files.map((f) => f.path).sort();
   assert.deepEqual(paths, [
+    'personalities/A.sc',
     'personalities/Bar 2.sc',
     'personalities/Bar.sc',
     'personalities/Foo copy.sc',
@@ -98,7 +105,7 @@ test('mine dedupes by blob, records every branch/path, flags duplicates and writ
 
   assert.deepEqual(
     index.branches.map((b) => [b.name, b.files]),
-    [['one', 7], ['two', 2]],
+    [['one', 8], ['two', 4]],
   );
 
   const byName = (n: string) => index.entries.filter((e) => e.name === n);
@@ -114,7 +121,29 @@ test('mine dedupes by blob, records every branch/path, flags duplicates and writ
   assert.equal(readFileSync(join(out, 'one', 'personalities', 'Spaced Name.sc'), 'utf8').includes('Pdef'), true);
   assert.ok(existsSync(join(out, 'two', 'personalities', 'Only2.sc')));
 
+  // a spaced name on both branches: one entry, both locations, one raw copy
   assert.equal(byName('Spaced Name').length, 1);
+  assert.deepEqual(byName('Spaced Name')[0].branches, [
+    { branch: 'one', path: 'personalities/Spaced Name.sc' },
+    { branch: 'two', path: 'personalities/Spaced Name.sc' },
+  ]);
+  assert.equal(existsSync(join(out, 'two', 'personalities', 'Spaced Name.sc')), false);
+  // one blob at different paths/names across branches: both locations indexed, one raw copy
+  const a = byName('A')[0];
+  const aCopy = byName('A copy')[0];
+  assert.deepEqual(a.branches, [{ branch: 'one', path: 'personalities/A.sc' }]);
+  assert.deepEqual(aCopy.branches, [{ branch: 'two', path: 'personalities/Sub Dir/A copy.sc' }]);
+  assert.equal(aCopy.blob, a.blob);
+  assert.equal(aCopy.raw, 'one/personalities/A.sc');
+  assert.ok(existsSync(join(out, 'one', 'personalities', 'A.sc')));
+  assert.equal(existsSync(join(out, 'two', 'personalities', 'Sub Dir')), false);
+  assert.equal(aCopy.duplicateOf, 'A');
+  assert.equal(aCopy.duplicateOfBlob, a.blob);
+  assert.equal(a.facts.idiom, 'synth'); // Synth.after
+  assert.equal(byName('Bar 2')[0].duplicateOfBlob, byName('Bar')[0].blob);
+  // branch commits recorded; no timestamp anywhere
+  const head = (b: string) => git(repo, 'rev-parse', b).trim();
+  assert.deepEqual(index.branches.map((b) => b.commit), [head('one'), head('two')]);
   assert.equal(byName('Foo copy')[0].duplicateOf, 'Foo');
   assert.equal(byName('Foo')[0].duplicateOf, undefined);
   assert.equal(byName('Bar 2')[0].duplicateOf, 'Bar');
@@ -133,10 +162,12 @@ test('mine dedupes by blob, records every branch/path, flags duplicates and writ
   assert.equal(json.entries.length, index.entries.length);
   const md = readFileSync(join(out, 'INDEX.md'), 'utf8');
   assert.match(md, /Spaced Name/);
-  assert.match(md, /## one/);
+  assert.match(md, new RegExp(`## one @ ${head('one').slice(0, 7)}`));
   assert.match(md, /## two/);
   const stats = readFileSync(join(out, 'stats.md'), 'utf8');
   assert.match(stats, /SinOsc/);
+  assert.match(stats, new RegExp(`two @ ${head('two').slice(0, 7)}`));
+  for (const t of [JSON.stringify(json), md, stats]) assert.doesNotMatch(t, /minedAt|\d{4}-\d\d-\d\dT\d\d:/);
   assert.equal(readdirSync(out).some((f) => f.endsWith('.tmp')), false);
 });
 
@@ -154,4 +185,47 @@ test('the CLI mines a repo and exits 1 on a git error', () => {
     code = (e as { status: number }).status;
   }
   assert.equal(code, 1);
+});
+
+test('two consecutive mine() runs produce byte-identical committed outputs', () => {
+  const repo = fixture();
+  const out = mkdtempSync(join(tmpdir(), 'cos-mine-repro-'));
+  const files = ['index.json', 'INDEX.md', 'stats.md'];
+  mine({ repo, branches: ['one', 'two'], out });
+  const first = files.map((f) => readFileSync(join(out, f)));
+  mine({ repo, branches: ['one', 'two'], out });
+  files.forEach((f, i) => assert.ok(first[i].equals(readFileSync(join(out, f))), f));
+});
+
+test('the canonical duplicate is silence, then a non-ordinal name, then most branches, then shortest', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'cos-mine-canon-'));
+  git(repo, 'init', '-q', '-b', 'one');
+  git(repo, 'config', 'user.email', 't@example.com');
+  git(repo, 'config', 'user.name', 't');
+  put(repo, 'personalities/1. Start.sc', '// silent\n');
+  put(repo, 'personalities/2. Start.sc', '// silent\n');
+  put(repo, 'personalities/silence.sc', '// silent\n');
+  put(repo, 'personalities/1. Go.sc', '// go\n');
+  put(repo, 'personalities/Go.sc', '// go\n');
+  put(repo, 'personalities/Longname.sc', '// x\n');
+  put(repo, 'personalities/Wide.sc', '// x\n');
+  put(repo, 'personalities/Pq.sc', '// y\n');
+  put(repo, 'personalities/P.sc', '// y\n');
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-q', '-m', 'one');
+  git(repo, 'checkout', '-q', '-b', 'two');
+  git(repo, 'rm', '-q', 'personalities/Wide.sc');
+  git(repo, 'commit', '-q', '-m', 'two');
+  const out = mkdtempSync(join(tmpdir(), 'cos-mine-canon-out-'));
+  const index = mine({ repo, branches: ['one', 'two'], out });
+  const dup = (n: string) => index.entries.find((e) => e.name === n)!.duplicateOf;
+  assert.equal(dup('silence'), undefined);
+  assert.equal(dup('1. Start'), 'silence');
+  assert.equal(dup('2. Start'), 'silence');
+  assert.equal(dup('Go'), undefined);
+  assert.equal(dup('1. Go'), 'Go');
+  assert.equal(dup('Longname'), undefined); // on two branches, Wide on one
+  assert.equal(dup('Wide'), 'Longname');
+  assert.equal(dup('P'), undefined);
+  assert.equal(dup('Pq'), 'P');
 });

@@ -1,17 +1,19 @@
 # AirKit corpus statistics
 
-Generated at 2026-09-27T05:03:09.973Z. 574 entries (561 unique blobs, 14 flagged duplicates);
+Mined from Airsticks-RPI @ a7a893e, Airsticks-Desktop @ 5ac5790, MiMBrentonShows @ d7e05a6, master @ 1f753bf, AirConcert @ 3703cae.
+
+574 entries (561 unique blobs, 14 flagged duplicates);
 statistics below are over the 560 non-duplicate entries (459 personalities).
 
 ## Per-branch totals
 
-| branch | ref | personalities | synths | only on this branch |
-|---|---|---:|---:|---:|
-| Airsticks-RPI | `origin/Airsticks-RPI` | 233 | 67 | 126 |
-| Airsticks-Desktop | `origin/Airsticks-Desktop` | 187 | 67 | 72 |
-| MiMBrentonShows | `origin/MiMBrentonShows` | 130 | 51 | 81 |
-| master | `origin/master` | 71 | 18 | 37 |
-| AirConcert | `origin/AirConcert` | 32 | 70 | 40 |
+| branch | ref | commit | personalities | synths | only on this branch |
+|---|---|---|---:|---:|---:|
+| Airsticks-RPI | `origin/Airsticks-RPI` | `a7a893e` | 233 | 67 | 126 |
+| Airsticks-Desktop | `origin/Airsticks-Desktop` | `5ac5790` | 187 | 67 | 72 |
+| MiMBrentonShows | `origin/MiMBrentonShows` | `d7e05a6` | 130 | 51 | 81 |
+| master | `origin/master` | `1f753bf` | 71 | 18 | 37 |
+| AirConcert | `origin/AirConcert` | `3703cae` | 32 | 70 | 40 |
 
 ## UGens (top 40, files using each)
 
@@ -62,10 +64,10 @@ statistics below are over the 560 non-duplicate entries (459 personalities).
 
 | idiom | files |
 |---|---:|
-| pdef | 237 |
+| pdef | 235 |
 | ndef | 1 |
 | synth | 168 |
-| hybrid | 29 |
+| hybrid | 31 |
 | none | 24 |
 
 ## Header-key coverage (personalities)

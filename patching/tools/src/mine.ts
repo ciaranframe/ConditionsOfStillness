@@ -7,7 +7,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { writeAtomic } from './atomic.ts';
-import { listTree, readBlob } from './git.ts';
+import { listTree, readBlob, resolveCommit } from './git.ts';
 
 export type Idiom = 'pdef' | 'ndef' | 'synth' | 'hybrid' | 'none';
 
@@ -33,12 +33,14 @@ export type Entry = {
   raw: string; // raw copy relative to the corpus dir: <firstBranch>/<path>
   branches: Location[];
   duplicateOf?: string;
+  duplicateOfBlob?: string;
   facts: FileFacts;
 };
 
-export type BranchInfo = { name: string; ref: string; files: number; personalities: number; synths: number };
+export type BranchInfo = { name: string; ref: string; commit: string; files: number; personalities: number; synths: number };
 
-export type Index = { minedAt: string; branches: BranchInfo[]; entries: Entry[] };
+// No timestamp: the outputs are a pure function of the mined commits, so a re-run is a no-op.
+export type Index = { branches: BranchInfo[]; entries: Entry[] };
 
 export const DEFAULT_BRANCHES = ['Airsticks-RPI', 'Airsticks-Desktop', 'MiMBrentonShows', 'master', 'AirConcert'];
 export const PREFIXES = ['personalities', 'synths'];
@@ -112,7 +114,7 @@ export function analyse(source: string): FileFacts {
   const has = {
     pdef: /\bPdef\b/.test(code),
     ndef: /\bNdef\b/.test(code),
-    synth: /\bSynth\s*\(|\bSynth\.new\b/.test(code),
+    synth: /\bSynth\s*\(|\bSynth\.(?:new|after|before|head|tail|grain|replace)\b/.test(code),
   };
   const present = (Object.keys(has) as Array<keyof typeof has>).filter((k) => has[k]);
   const idiom: Idiom = present.length > 1 ? 'hybrid' : present.length === 1 ? present[0] : 'none';
@@ -157,10 +159,12 @@ export function mine(opts: { repo: string; branches: string[]; out: string; refP
 
   for (const branch of opts.branches) {
     const ref = prefix + branch;
-    const files = listTree(opts.repo, ref, PREFIXES);
+    const commit = resolveCommit(opts.repo, ref);
+    const files = listTree(opts.repo, commit, PREFIXES);
     branches.push({
       name: branch,
       ref,
+      commit,
       files: files.length,
       personalities: files.filter((f) => f.path.startsWith('personalities/')).length,
       synths: files.filter((f) => f.path.startsWith('synths/')).length,
@@ -195,11 +199,35 @@ export function mine(opts: { repo: string; branches: string[]; out: string; refP
   }
 
   markDuplicates(entries);
-  const index: Index = { minedAt: new Date().toISOString(), branches, entries };
+  const index: Index = { branches, entries };
   writeAtomic(join(opts.out, 'index.json'), indexJson(index));
   writeAtomic(join(opts.out, 'INDEX.md'), indexMd(index));
   writeAtomic(join(opts.out, 'stats.md'), statsMd(index));
   return index;
+}
+
+const ORDINAL = /^\d+\.\s/;
+
+function branchCount(e: Entry): number {
+  return new Set(e.branches.map((l) => l.branch)).size;
+}
+
+// Among byte-identical entries the original is: `silence` if present, else a name without a
+// leading "N. " ordinal, else the name on the most branches, else the shortest name, else the
+// first in branch order (entries are already in branch order, and sort is stable).
+function pickCanonical(group: Entry[]): Entry {
+  const rank = (e: Entry): number[] => [
+    e.name === 'silence' ? 0 : 1,
+    ORDINAL.test(e.name) ? 1 : 0,
+    -branchCount(e),
+    e.name.length,
+  ];
+  return [...group].sort((a, b) => {
+    const ra = rank(a);
+    const rb = rank(b);
+    for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i] - rb[i];
+    return 0;
+  })[0];
 }
 
 function markDuplicates(entries: Entry[]): void {
@@ -207,15 +235,29 @@ function markDuplicates(entries: Entry[]): void {
   for (const e of entries) byBlob.set(e.blob, [...(byBlob.get(e.blob) ?? []), e]);
   for (const group of byBlob.values()) {
     if (group.length < 2) continue;
-    // Prefer an entry whose name is not itself a copy-name as the original.
-    const canon = group.find((e) => stripCopyName(e.name) === e.name) ?? group[0];
-    for (const e of group) if (e !== canon) e.duplicateOf = canon.name;
+    const canon = pickCanonical(group);
+    for (const e of group) {
+      if (e === canon) continue;
+      e.duplicateOf = canon.name;
+      e.duplicateOfBlob = canon.blob;
+    }
   }
-  const names = new Set(entries.map((e) => `${e.kind}\0${e.name}`));
+  const byName = new Map<string, Entry[]>();
+  for (const e of entries) {
+    const k = `${e.kind}\0${e.name}`;
+    byName.set(k, [...(byName.get(k) ?? []), e]);
+  }
   for (const e of entries) {
     if (e.duplicateOf) continue;
     const base = stripCopyName(e.name);
-    if (base !== e.name && names.has(`${e.kind}\0${base}`)) e.duplicateOf = base;
+    if (base === e.name) continue;
+    const targets = byName.get(`${e.kind}\0${base}`);
+    if (!targets) continue;
+    // Several versions may share the base name: prefer one on a branch this entry is on.
+    const mine = new Set(e.branches.map((l) => l.branch));
+    const target = targets.find((t) => t.branches.some((l) => mine.has(l.branch))) ?? targets[0];
+    e.duplicateOf = target.name;
+    e.duplicateOfBlob = target.blob;
   }
 }
 
@@ -223,7 +265,6 @@ function markDuplicates(entries: Entry[]): void {
 function indexJson(index: Index): string {
   const lines = [
     '{',
-    `  "minedAt": ${JSON.stringify(index.minedAt)},`,
     '  "branches": [',
     index.branches.map((b) => `    ${JSON.stringify(b)}`).join(',\n'),
     '  ],',
@@ -248,14 +289,15 @@ function indexMd(index: Index): string {
   const out: string[] = [
     '# AirKit corpus index',
     '',
-    `Generated by \`patching/tools/corpus-mine.ts\` at ${index.minedAt}. Raw files (gitignored) are under`,
+    `Generated by \`patching/tools/corpus-mine.ts\` from ${index.branches.map((b) => `${b.name} @ ${b.commit.slice(0, 7)}`).join(', ')}.`,
+    'Raw files (gitignored) are under',
     '`patching/corpus/<branch>/<path>`, one copy per blob at the first branch it appears on (see the',
     '`raw` field in `index.json`). "dup of" marks a byte-identical file under another name or a',
     '`copy`/` N`/`(N)` variant of another name.',
     '',
   ];
   for (const b of index.branches) {
-    out.push(`## ${b.name}`, '', `\`${b.ref}\`: ${b.personalities} personalities, ${b.synths} synths.`, '');
+    out.push(`## ${b.name} @ ${b.commit.slice(0, 7)}`, '', `\`${b.ref}\` (${b.commit}): ${b.personalities} personalities, ${b.synths} synths.`, '');
     for (const kind of ['personality', 'synth'] as const) {
       const rows = index.entries
         .filter((e) => e.kind === kind)
@@ -292,17 +334,19 @@ function statsMd(index: Index): string {
   const out: string[] = [
     '# AirKit corpus statistics',
     '',
-    `Generated at ${index.minedAt}. ${index.entries.length} entries (${blobs} unique blobs, ${dups} flagged duplicates);`,
+    `Mined from ${index.branches.map((b) => `${b.name} @ ${b.commit.slice(0, 7)}`).join(', ')}.`,
+    '',
+    `${index.entries.length} entries (${blobs} unique blobs, ${dups} flagged duplicates);`,
     `statistics below are over the ${originals.length} non-duplicate entries (${pers.length} personalities).`,
     '',
     '## Per-branch totals',
     '',
-    '| branch | ref | personalities | synths | only on this branch |',
-    '|---|---|---:|---:|---:|',
+    '| branch | ref | commit | personalities | synths | only on this branch |',
+    '|---|---|---|---:|---:|---:|',
   ];
   for (const b of index.branches) {
     const only = index.entries.filter((e) => e.branches.every((l) => l.branch === b.name)).length;
-    out.push(`| ${b.name} | \`${b.ref}\` | ${b.personalities} | ${b.synths} | ${only} |`);
+    out.push(`| ${b.name} | \`${b.ref}\` | \`${b.commit.slice(0, 7)}\` | ${b.personalities} | ${b.synths} | ${only} |`);
   }
 
   const hist = new Map<string, number>();
