@@ -60,7 +60,9 @@ export function buildView(d: ViewDeps): View {
   const sceneView = (s: Scene | null): SceneView | null =>
     s ? { index: s.index, id: s.id, name: s.name, fade: s.fade, n: s.index + 1, summary: summarize(s, labels) } : null;
 
-  const status = airkit.status, levels = airkit.levels, online = airkit.online;
+  const online = airkit.online;
+  const status = online ? airkit.status : null;   // AirkitLink keeps the last status after going offline: never show it as current
+  const levels = airkit.levels;
   const levelsAgeMs = levels ? Math.max(0, Math.round(now - levels.at)) : null;
 
   const wrists = {} as Record<Wrist, WristView>;

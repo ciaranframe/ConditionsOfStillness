@@ -29,6 +29,16 @@ const MIME: Record<string, string> = {
 };
 const PAGES: Record<string, string> = { '/perform': 'perform.html', '/admin': 'admin.html' };
 const RECENT_LOG_LINES = 200;
+const QUIET = new Set<Command['type']>(['trim', 'master']);   // sliders send up to 10/s while dragged: not logged per message
+
+/** The optional client-supplied correlation id a command carries, echoed on its ack. `assignStick` is the
+ *  exception: its `id` is the stick id (Command shape fixed by the pages), so its ack carries no id. */
+function ackId(x: unknown): number | string | undefined {
+  if (typeof x !== 'object' || x === null) return undefined;
+  const { id, type } = x as { id?: unknown; type?: unknown };
+  if (type === 'assignStick') return undefined;
+  return typeof id === 'number' || typeof id === 'string' ? id : undefined;
+}
 
 /** The file a URL path names inside publicDir, or null when it is malformed or would escape it. */
 export function staticPath(publicDir: string, urlPath: string): string | null {
@@ -42,15 +52,22 @@ export function staticPath(publicDir: string, urlPath: string): string | null {
 
 function sendFile(res: ServerResponse, full: string | null): void {
   if (!full || !existsSync(full) || !statSync(full).isFile()) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); res.end('not found'); return; }
-  res.writeHead(200, { 'content-type': MIME[extname(full)] ?? 'application/octet-stream', 'cache-control': 'no-cache' });
-  createReadStream(full).pipe(res);
+  const stream = createReadStream(full);
+  stream.on('error', () => {   // vanished or unreadable between the stat and the read: answer, never crash
+    if (!res.headersSent) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); res.end('not found'); }
+    else res.destroy();
+  });
+  stream.once('open', () => {
+    res.writeHead(200, { 'content-type': MIME[extname(full)] ?? 'application/octet-stream', 'cache-control': 'no-cache' });
+    stream.pipe(res);
+  });
 }
 
 const isWrist = (x: unknown): x is Wrist => typeof x === 'string' && (WRISTS as readonly string[]).includes(x);
 const isNum = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 
-/** A well-formed Command (only its own fields kept), or an error string. */
+/** A well-formed Command (only its own fields kept; a correlation `id` is stripped), or an error string. */
 export function parseCommand(x: unknown): Command | string {
   if (!isRecord(x)) return 'command must be an object';
   const bad = (what: string) => `${String(x.type)}: ${what}`;
@@ -108,22 +125,24 @@ export function startServer(opts: ServerOptions): Promise<{ port: number; broadc
     const send = (msg: unknown) => { if (ws.readyState === WebSocket.OPEN) ws.send(typeof msg === 'string' ? msg : JSON.stringify(msg)); };
     const v = viewJson(); if (v) send(v);
     send({ type: 'log', lines: log.recent(RECENT_LOG_LINES) });
-    // One command at a time per client, so acks come back in the order the commands were sent.
-    let queue: Promise<void> = Promise.resolve();
+    // Every command is dispatched at once: a panic must not wait behind a cue that is awaiting ready.
+    // Acks may therefore arrive out of order; a client correlates them by the optional `id` it sent.
     ws.on('message', (raw) => {
-      queue = queue.then(async () => {
-        let parsed: unknown;
-        try { parsed = JSON.parse(String(raw)); } catch { send({ type: 'ack', ok: false, error: 'bad json' }); return; }
-        const cmd = parseCommand(parsed);
-        if (typeof cmd === 'string') { log.line(`[web] ${who}: refused — ${cmd}`, 'warn'); send({ type: 'ack', ok: false, error: cmd }); return; }
-        log.line(`[web] ${who}: ${JSON.stringify(cmd)}`);
-        try { await opts.onCommand(cmd, 'page'); send({ type: 'ack', ok: true }); }
+      let parsed: unknown;
+      try { parsed = JSON.parse(String(raw)); } catch { send({ type: 'ack', ok: false, error: 'bad json' }); return; }
+      const id = ackId(parsed);
+      const ack = (ok: boolean, error?: string) => send({ type: 'ack', ok, ...(id !== undefined ? { id } : {}), ...(error !== undefined ? { error } : {}) });
+      const cmd = parseCommand(parsed);
+      if (typeof cmd === 'string') { log.line(`[web] ${who}: refused — ${cmd}`, 'warn'); ack(false, cmd); return; }
+      if (!QUIET.has(cmd.type)) log.line(`[web] ${who}: ${JSON.stringify(cmd)}`);
+      void (async () => {
+        try { await opts.onCommand(cmd, 'page'); ack(true); }
         catch (e) {
           const error = e instanceof Error ? e.message : String(e);
           log.line(`[web] ${cmd.type} failed: ${error}`, 'warn');
-          send({ type: 'ack', ok: false, error });
+          ack(false, error);
         }
-      });
+      })();
     });
     ws.on('error', (e) => log.line(`[web] client ${who} error: ${e.message}`, 'warn'));
     ws.on('close', () => log.line(`[web] client ${who} disconnected`));

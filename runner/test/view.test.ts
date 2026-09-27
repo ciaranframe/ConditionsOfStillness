@@ -75,10 +75,11 @@ test('detail names params, the live slot and a preload', async (t) => {
   assert.equal(v.status[0]!.tone, 'ok');
 });
 
-test('offline engine, no scenes, no sticks: buildView does not throw', () => {
+test('offline engine, no scenes, no sticks: buildView does not throw', (t) => {
   const airkit = new AirkitLink({ host: '127.0.0.1', port: 9, sourcePort: 0, log: () => {} });
   const show = new Show({ scenes: [], airkit, cast: () => cast, store: new StateStore(join(mkdtempSync(join(tmpdir(), 'cos-view-')), 's.json')), log: () => {} });
   const sticks = new StickIngest({ port: 0, cast: () => cast, onImu: () => {}, onAux: () => {}, log: () => {} });
+  t.after(() => { sticks.close(); airkit.close(); show.dispose(); });
   sticks.handlePacket('127.0.0.1', battery('4', 0.08));
   const v = buildView({ show, sticks, airkit, pedal: () => ({ state: 'NO MIDI', port: null, lastEvent: null }), castError: () => null });
   assert.equal(v.sceneCount, 0); assert.equal(v.scene, null); assert.equal(v.next, null); assert.equal(v.prev, null); assert.equal(v.standby, true);
@@ -86,7 +87,22 @@ test('offline engine, no scenes, no sticks: buildView does not throw', () => {
   assert.equal(v.engine.online, false); assert.equal(v.engine.levelsAgeMs, null); assert.equal(v.engine.port, 9); assert.equal(v.engine.host, '127.0.0.1');
   assert.equal(v.wrists.CR.battery, 8); assert.equal(v.wrists.ZL.ageMs, -1); assert.equal(v.wrists.ZL.peak, 0);
   assert.equal(v.slots[0]!.tickAgeMs, -1); assert.equal(v.slots[0]!.name, '');
-  sticks.close(); airkit.close(); show.dispose();
+});
+
+test('an engine that went offline shows no stale status', async (t) => {
+  const r = await rig(t);
+  const sticks = new StickIngest({ port: 0, cast: () => cast, onImu: () => {}, onAux: () => {}, log: () => {} });
+  t.after(() => sticks.close());
+  const deps = { show: r.show, sticks, airkit: r.airkit, pedal: () => ({ state: 'OK' as const, port: 'x', lastEvent: null }), castError: () => null };
+  assert.ok(buildView(deps).slots.some((s) => s.ready), 'some slot ready while online');
+  await r.fake.stop();
+  for (let i = 0; i < 100 && r.airkit.online; i++) await sleep(20);   // pollMs 50 × 3 missed polls
+  const v = buildView(deps);
+  assert.equal(v.engine.online, false);
+  assert.deepEqual(v.status.find((c) => c.key === 'AIRKIT'), { key: 'AIRKIT', value: 'OFFLINE', tone: 'bad' });
+  assert.deepEqual(v.status.find((c) => c.key === 'CPU'), { key: 'CPU', value: '—', tone: 'inert' });
+  assert.equal(v.engine.cpu, 0); assert.equal(v.engine.limiterOn, false); assert.equal(v.engine.deviceCount, 0);
+  for (const s of v.slots) { assert.equal(s.ready, false); assert.equal(s.name, ''); assert.equal(s.tickAgeMs, -1); }
 });
 
 test('summarize and dbfs', () => {
