@@ -55,8 +55,8 @@ var group;
 ~init = ~init <> { |d|
     topEnvironment.use {
         group = Group.new;
-        Pdef(m.ptn, Pbind(\instrument, \cosNameHit, \out, ob, \group, group,
-            \dur, 0.25, \amp, 0));
+        Pdef(m.ptn, Pbind(\instrument, \cosNameHit, \out, ob, \group, group));
+        Pdef(m.ptn).set(\amp, 0, \dur, 0.25);        // seed the .set-driven keys here
         Pdef(m.ptn).play(~beatClock, quant: 0.25);   // not 8: that is 4 s on this clock
     };
     d
@@ -66,9 +66,17 @@ var group;
     Pdef(m.ptn).remove;
     if (g.notNil) { fork { s.bind { g.freeAll }; s.sync; g.free } };
 };
-~idleNext = { |d, ctx| Pdef(m.ptn).set(\amp, e.lincurve(0.05, 2, -40, -12, -2).dbamp,
-    \dur, m.rrateMassFiltered.clip(0, 1).linexp(0, 1, 0.5, 0.0625)) };
+~idleNext = { |d, ctx|
+    var e = track.();                    // the template's gravity-free energy
+    Pdef(m.ptn).set(\amp, e.lincurve(0.05, 2, -40, -12, -2).dbamp,
+        \dur, m.rrateMassFiltered.clip(0, 1).linexp(0, 1, 0.5, 0.0625));
+};
 ```
+
+A Pdef's `envir` is chained *under* its pattern (`pattern <> envir`, SCClassLibrary
+`JITLib/Patterns/Pdef.sc`), so a key the `Pbind` sets itself always wins: any key driven by
+`Pdef(...).set` must not be hard-coded in the `Pbind` (or read it with `Pkey`), or the tick's
+`.set` changes nothing and the pattern stays silent.
 
 - Corpus: the pre-COTF branches ran exactly this, without a conductor —
   `Pdef(m.ptn).play(quant: 0.1);` (patching/corpus/Airsticks-RPI/personalities/_TEMPLATE_ak_pfile.sc:88), torn down by
@@ -189,8 +197,8 @@ if (tier != lastTier) { lastTier = tier; /* tier-entry change, posted once */ };
 - Corpus: per-load engagement integral `engagement = engagement + (activity * tickDt);` (patching/corpus/AirConcert/personalities/PERCUSSION.sc:560)
   driving fill density `var fillEvery = engagement.linlin(0, 300, 8, 2)` (patching/corpus/AirConcert/personalities/PERCUSSION.sc:557); an
   inverted tier (stillness = full chord) in `{ activity > 0.99 } { \high }` (patching/corpus/AirConcert/personalities/cotf_whisperer1.sc:139).
-  Steph §23 (decay 0.98 ≈ 1.5 s half-life at 30 Hz; hysteresis; tier-entry effects;
-  time-in-tier).
+  Steph §23 (decay 0.98 per tick at 30 Hz: a time constant of ≈ 1.6 s, half-life ≈ 1.1 s;
+  hysteresis; tier-entry effects; time-in-tier).
 - `tickDt = 0.033` hard-coded mirrors `~secs`; derive time from `thisThread.seconds` instead.
 
 ## 7. Stillness reveal
@@ -237,7 +245,9 @@ if (nd == \still) { dir = \still };
   `fireChord.(root, tier, ampScale);` (patching/corpus/AirConcert/personalities/cotf_cascade1.sc:186). Steph §24 `direction`, `hold`,
   `reversal`; `personality_authoring.md` §8.
 - Rotation isolated from impact, two handles from one wrist:
-  `var under = m.accelMassFiltered.lincurve(0, 1.0, m.rrateMassFiltered.neg, 0, -1)` (patching/corpus/AirConcert/personalities/cotf_test2.sc:132) — high for a
+  `var under = m.accelMassFiltered.lincurve(0, 1.0, m.rrateMassFiltered.neg, 0, -1).neg.lincurve(0, 0.4, 0, 1, -1` (patching/corpus/AirConcert/personalities/cotf_test2.sc:132)
+  — the inner `lincurve` maps impact onto −rotation…0, the `.neg` turns it into rotation that
+  impact pulls towards 0, and the outer `lincurve` stretches 0–0.4 onto 0–1: high for a
   smooth turn, ~0 for a strike (Steph §9). Useful for a pianist's rolled chord vs a key attack.
 
 ## 9. Two-hand (`2H`): partner energy, mirror, complement

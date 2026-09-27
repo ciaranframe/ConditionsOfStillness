@@ -1,13 +1,16 @@
 # COS_<Name> — samples to find
 
 For the patch `airkit/personalities/COS_<Name>.sc` (research note `patching/notes/COS_<Name>.md`).
-Download into this folder under any filename that **starts with the slot name and a hyphen**
-(`<slot>-anything.wav`), then run `npm run samples:check -- COS_<Name>`. Any format ffmpeg reads;
-any sample rate (converted to 48 kHz). Licences: CC0, CC-BY (record the attribution in
+Download into this folder (not `wav/`) under a filename that **starts with the slot name and a
+hyphen** (`<slot>-anything.wav`) or is exactly `<slot>.<ext>` (case doesn't matter), then run
+`npm run samples:check -- COS_<Name>`. Formats: wav aif aiff flac mp3 ogg m4a; any sample rate
+and channel count (converted to 48 kHz, and to the row's mono/stereo). A length outside the
+range is only a warning. Licences: CC0, CC-BY (record the attribution in
 `SOURCES.md`), or your own recording — nothing NC/ND, nothing without a stated licence.
 
 <!-- The table below is parsed by patching/tools/samples-check.ts: keep the header row exactly.
-     length: "min–max s" or "≤ N s"; channels: mono | stereo; pitched: yes | no. -->
+     length: "≤ N s" | "A–B s" (en dash or hyphen) | "N s" (= N×0.5 … N×2) | "any";
+     channels: mono | stereo (the converted file's); pitched: yes | no. -->
 
 | slot | what | length | channels | pitched | licence |
 |---|---|---|---|---|---|

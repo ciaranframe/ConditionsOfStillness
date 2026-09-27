@@ -3,7 +3,7 @@
 Companion to `engine.md`. The union of Glimmer's `pitfalls.md` (1–23; 1–18 are COTF's
 `bible/pitfalls.md`, kept in the same order so numbers match both), the lessons of COTF's five
 annotated show patches, Steph's `concert_p_files.md` §12 (24–27), and what this engine adds
-(28–40, from spec §5.1 and the engine itself). Each: symptom, cause, fix, and the lint rule
+(28–41, from spec §5.1 and the engine itself). Each: symptom, cause, fix, and the lint rule
 that catches it (`patching/tools/src/lint.ts`), if any. Where an older source disagrees with
 this engine, the entry says so and follows the engine.
 
@@ -144,70 +144,97 @@ this engine, the entry says so and follows the engine.
 
 ## 28. The corpus predates this engine
 - **Symptom:** a copied idea never fires. **Cause:** older branches had `~onHit`, `~onMoving`,
-  `~nextMidiOut`, `~vdef`, `\customVisualEvent`, `m.com` pitch passing; COTF patches lean on
-  beat hooks and `~onResync`. None of these is dispatched here (`engine.md` §2).
+  `~nextMidiOut`, `~vdef`, `\customVisualEvent`, `m.com` pitch passing — `~onHit = {|state|`
+  (patching/corpus/Airsticks-RPI/personalities/funMove3.sc:166), `m.com.root = e.root;`
+  (patching/corpus/Airsticks-RPI/personalities/_TEMPLATE_ak_pfile.sc:106); COTF patches lean on
+  beat hooks and `~onResync = { |idx|` (patching/corpus/AirConcert/personalities/ALTOSYNTH.sc:105).
+  None of these is dispatched here (`engine.md` §2).
 - **Fix:** copy the *logic*, re-host it in `~idleNext`, cite where it came from. *Lint:*
   `class.unknown` catches some; the rest only the audition shows.
 
 ## 29. Handlers land before `~init`, or on the patch being replaced
 - **Symptom:** `nil` errors in `~onSceneParams`; the outgoing patch jumps to the next scene's
   params for a moment. **Cause:** `~onSceneParams` exists from file-body time; the runner sends
-  params before the load, to the env still installed (spec §5.1). **Fix:** hooks only set vars;
+  params before the load, to the env still installed (spec §5.1):
+  `d.env.use { ~sceneParams = params; ~onSceneParams.(params) };` (airkit/code3.0/conditions/main_conditions.scd:197). **Fix:** hooks only set vars;
   every synth reference guarded. *Lint:* `hooks.scene-params` (presence only).
 
 ## 30. Caching the partner's model
 - **Symptom:** a `2H` patch stops following the other hand after that slot reloads.
-- **Cause:** the partner's env is replaced on every reload. **Fix:** read
+- **Cause:** the partner's env is replaced on every reload; the device is looked up by slot,
+  `~cosPartnerDevice = { |slot|` (airkit/code3.0/conditions/main_conditions.scd:41). **Fix:** read
   `~partner !? { |p| p.env[\model] }` every tick; smooth raw partner values yourself — the
-  partner's `*Filtered` coefficients belong to its own patch (`silence` sets 0.7/0.2).
+  partner's `*Filtered` coefficients belong to its own patch (`silence` sets 0.7/0.2:
+  `m.accelMassFilteredAttack = 0.7;` (airkit/personalities/silence.sc:3)).
   *Lint:* `partner.guard`, `name.two-hand`.
 
 ## 31. Scene-param values: Symbols, absent, stale
 - **Symptom:** `register` never matches; a patch breaks with no params. **Cause:** strings arrive
-  as Symbols (`\low == "low"` is false); the map entry may be nil or empty. **Fix:** compare
+  as Symbols (`\low == "low"` is false), keys too, `params.put(kv[0].asSymbol, kv[1])`
+  (airkit/code3.0/conditions/main_conditions.scd:191); the map entry may be nil or empty,
+  `~cosSlotParams = Dictionary();` (airkit/code3.0/conditions/main_conditions.scd:27). **Fix:** compare
   `.asSymbol`, clamp numbers, default every key, test with no params. *Lint:* `hooks.scene-params`.
 
 ## 32. State that explodes on first hearing
 - **Symptom:** a crossfade arrives already dense, ringing or loud. **Cause:** the standby slot
-  ran unheard on the performer's motion for minutes. **Fix:** leaky, clamped integrators; no
+  ran unheard on the performer's motion for minutes — every enabled device runs the tick,
+  `~processDeviceData.(d);` (airkit/code3.0/personalityController.scd:324). **Fix:** leaky, clamped integrators; no
   queued events; no charged feedback (`patterns.md` §11). *Lint:* none; audition `--long`.
 
 ## 33. Idle CPU is eight live patches
 - **Symptom:** dropouts when nothing is happening. **Cause:** every standby slot ticks and
   sounds at level 0. **Fix:** a rest floor that stops spawning; one long-lived synth per voice;
-  measure sclang CPU as well as `serverCpu` (spec §5.1). *Lint:* none.
+  measure sclang CPU as well as `serverCpu` (spec §5.1), which the status reply carries,
+  `\"serverCpu\":%` (airkit/code3.0/conditions/main_conditions.scd:241). *Lint:* none.
 
 ## 34. One-bar quant on this clock is four seconds
-- **Cause:** `~beatClock` is `TempoClock.new(2)`; COTF's `quant: 8` waits up to 8 beats.
+- **Cause:** `~beatClock = TempoClock.new(2).permanent_(true);` (airkit/code3.0/conditions/main_conditions.scd:22);
+  COTF's `quant: 8` waits up to 8 beats.
 - **Fix:** a small quant (0–0.25) or none. *Lint:* none.
 
 ## 35. Sample paths not from `~cosSamples`
 - **Symptom:** silence on another machine; "Buffer UGen: no buffer data"; a `GrainBuf` on an empty
   buffer can take scsynth down. **Fix:** `topEnvironment[\cosSamples] +/+ "COS_<Name>/wav/<slot>.wav"`,
-  mono for grains, name short reads, build only after the barrier.
+  mono for grains, name short reads, build only after the barrier. The root is
+  `~cosSamples = ("COS_SAMPLES".getenv` (airkit/code3.0/conditions/config.scd:18).
   *Lint:* `sample.manifest`, `banned.abs-path`.
 
 ## 36. Writing shared state
 - **Symptom:** another wrist or the next scene changes. **Cause:** `topEnvironment[…] =`,
-  `~cos… =`, `~devices`, or `m.com.x =` are shared by all nine slots. **Fix:** lexical vars only.
+  `~cos… =`, `~devices`, or `m.com.x =` are shared by all nine slots — `m.com` is one Event,
+  `var com = (` (airkit/code3.0/personalityController.scd:41). **Fix:** lexical vars only.
   *Lint:* `banned.global-write` (not `m.com`).
 
 ## 37. Rotation rate and angles have edges
 - **Symptom:** spikes near vertical; a sweep through the middle when turning past ±180°.
 - **Cause:** `rrateEvent` is per packet and Euler angles gimbal-lock at pitch ±π/2; smoothing
-  an angle across its ±1 wrap. **Fix:** clamp rates; unwrap or use rates for yaw and roll.
+  an angle across its ±1 wrap (`// gimbal lock handling` (airkit/code3.0/oscController.scd:208);
+  `\x:angleDiff.value(rx, ox)` (airkit/code3.0/oscController.scd:329)). **Fix:** clamp rates; unwrap or use rates for yaw and roll.
   Calibration and `quatCalibrated`/`sensorBus` are unreliable — don't use them. *Lint:* none.
 
 ## 38. Indexing past an array in a tick
-- **Symptom:** the slot freezes (8) on one gesture extreme. **Cause:** `linlin(-1, 1, 0, a.size)`
-  reaches `a.size` (BASSBUZZ, JUPITERSHARP). **Fix:** `clipAt`/`wrapAt`, or an explicit clip.
+- **Symptom:** the slot freezes (8) on one gesture extreme. **Cause:** a map onto `0…a.size`
+  reaches `a.size`: `linlin(-1, 1, 0, ideleNotes.size)` (patching/corpus/AirConcert/personalities/BASSBUZZ.sc:83),
+  `lincurve(-1.0,1.0,0,notes.size,-1)` (patching/corpus/AirConcert/personalities/JUPITERSHARP.sc:237). **Fix:** `clipAt`/`wrapAt`, or an explicit clip.
   *Lint:* none.
 
 ## 39. Posting every tick; stale headers; audition modes left on
 - **Fix:** post on change only (*lint* `tick.posting`); rewrite the header last so it matches the
-  finished patch (*lint* `header.keys`); ship any preview mode OFF (PERCUSSION `previewMode`).
+  finished patch (*lint* `header.keys`); ship any preview mode OFF, `var previewMode = true;`
+  (patching/corpus/AirConcert/personalities/PERCUSSION.sc:70).
 
 ## 40. `\silent` must mute every engine, and one-shots too
-- **Cause:** there is no tick in `\silent` to catch the voice you forgot; one-shots bypass a
-  Pdef's `\amp` (Steph §20). **Fix:** mute each synth and block spawns in the `\silent` branch;
-  a positive `.dbamp` floor is a boost, not silence (SOPRANOVOICE). *Lint:* `state.silent-unhandled`.
+- **Cause:** there is no tick in `\silent` to catch the voice you forgot,
+  `// note: \silent has no per-tick hook` (airkit/code3.0/personalityController.scd:286); one-shots
+  bypass a Pdef's `\amp` (Steph §20). **Fix:** mute each synth and block spawns in the `\silent`
+  branch; a positive `.dbamp` floor is a boost, not silence:
+  `lincurve(0, 2.0, 0.5, 1, -3).dbamp` (patching/corpus/AirConcert/personalities/SOPRANOVOICE.sc:192).
+  *Lint:* `state.silent-unhandled`.
+
+## 41. A stick that drops WiFi leaves the patch ticking on frozen data
+- **Symptom:** a drone holds its last level (or a tier its last state) while the performer
+  moves; nothing errors. **Cause:** the engine has no notion of stick liveness: the tick runs on
+  whatever `d.sensors` last received — `d.lastTick = Main.elapsedTime;`
+  (airkit/code3.0/personalityController.scd:327) is the tick's age, not the packets' (spec §5.1).
+- **Fix:** none inside the patch — don't invent a timeout that silences a genuinely still
+  wrist. Only the runner detects a dead stick and shows it on Admin. *Lint:* none.

@@ -16,6 +16,8 @@ samples:     [drop: "single water drop on glass, dry", bed: "distant rain on a t
   keys, `header.keys`).
 - Slot names are short lowercase words (`drop`, `bed`, `rim`): they become the filename prefix
   Ciaran uses and the converted file name `wav/<slot>.wav`. Never rename a slot once files exist.
+  Avoid a slot that is another's prefix plus a hyphen (`bed` and `bed-low`): a file
+  `bed-low-x.wav` then matches both.
 - The header, `SHOPPING.md`, `manifest.json` and the patch must agree on the slot list.
 
 ## 2. Write `samples/COS_<Name>/SHOPPING.md`
@@ -30,11 +32,16 @@ header row exactly:
 | bed | distant steady rain on a tin roof, no thunder or voices | 20–60 s | stereo | no | CC0 or CC-BY |
 ```
 
-- `length`: a range `min–max s` or a bound `≤ N s` — what the patch actually uses (a grain
-  source needs a few seconds of steady material; a hit needs the attack and a short tail).
-- `channels`: `mono` or `stereo`. **`mono` for anything read by `GrainBuf`/`TGrains`**, and for
-  hits that the patch pans itself; `stereo` only for beds whose width is the point.
-- `pitched`: `yes` when the patch transposes it musically — then say the pitch to look for (or
+- `length`, one of four forms (`parseLength`, `patching/tools/src/samples.ts`; the trailing `s`
+  is optional): `≤ N s` → 0…N; `A–B s` (en dash or hyphen) → A…B; a bare `N s` → N×0.5…N×2;
+  `any` → no limit. Give what the patch actually uses (a grain source needs a few seconds of
+  steady material; a hit needs the attack and a short tail). A source outside the range is
+  **still converted**, with a warning — the range guides the search, it does not reject.
+- `channels`: `mono` or `stereo` — the channel count the converted file **will have**: a stereo
+  source is downmixed to mono, a mono one up-mixed to stereo (ffmpeg `-ac`). **`mono` for
+  anything read by `GrainBuf`/`TGrains`**, and for hits the patch pans itself; `stereo` only for
+  beds whose width is the point.
+- `pitched`: `yes` or `no`; `yes` when the patch transposes it musically — then say the pitch to look for (or
   that any clearly pitched note will do and the patch will be told its `srcFreq`).
 - `licence`: CC0, CC-BY (attribution recorded in `SOURCES.md`), or Ciaran's own recording. No
   NC/ND licences, nothing without a stated licence.
@@ -47,26 +54,36 @@ voices until the files exist, and stop.
 
 ## 3. Ciaran downloads
 
-Into `samples/COS_<Name>/`, under any names **prefixed by the slot**: `drop-freesound-12345.wav`,
-`bed-tinroof.flac`. Audio files are gitignored (`samples/**/*.wav` etc.); `SHOPPING.md`,
-`manifest.json` and `SOURCES.md` are committed.
+Into `samples/COS_<Name>/` (not into `wav/`, which the check never reads), a file per slot whose
+basename **starts with `<slot>-`** or **is exactly `<slot>.<ext>`**, case-insensitive:
+`drop-freesound-12345.wav`, `bed-tinroof.flac`, `Rim.aiff`. Audio extensions read: wav aif aiff
+flac mp3 ogg m4a. When several files match a slot, the first in sorted order is used and the
+rest are reported as extras. Audio files are gitignored (`samples/**/*.wav` etc.);
+`SHOPPING.md`, `manifest.json` and `SOURCES.md` are committed.
 
 ## 4. `npm run samples:check -- COS_<Name>`
 
 `patching/tools/samples-check.ts` (plan Task 7):
 
-- parses `SHOPPING.md`, matches files to slots by the `<slot>-` prefix (no interactive
-  assignment: anything unmatched is printed and the run exits 1);
-- probes each file (`ffprobe`), reports unreadable or wrong-format files per file, checks length
-  and channels against the row;
-- converts with `ffmpeg` to 48 kHz 24-bit WAV, mono when the slot says mono, into
-  `samples/COS_<Name>/wav/<slot>.wav`;
-- writes `manifest.json` atomically:
-  `{ "<slot>": { "file": "wav/<slot>.wav", "frames": …, "channels": …, "sr": 48000, "source": "<original filename>" } }`;
-- writes a `SOURCES.md` skeleton (one row per slot: file, URL, author, licence) for Ciaran to
-  complete — the patch is not done until every row is filled.
+Usage `samples-check.ts COS_<Name> [--dir <samples root>]` (default root: the repo's `samples/`).
 
-Exit 0 all slots satisfied, 1 anything missing or wrong (with the reasons). Re-run after fixing.
+- parses `SHOPPING.md`'s table and matches files to slots as in §3 (no interactive assignment);
+- probes each matched file (`ffprobe`); an unreadable one is reported for its slot;
+- converts with `ffmpeg` to 48 kHz 24-bit WAV with the row's channel count (§2), into
+  `samples/COS_<Name>/wav/<slot>.wav`, and notes `stereo→mono` / `mono→stereo` and
+  `length out of range` on the slot's `[ok]` line;
+- writes `manifest.json` atomically, for the slots that converted (even on a failing run):
+  `{ "<slot>": { "file": "wav/<slot>.wav", "frames": …, "channels": 1|2, "sr": 48000, "source": "<original filename>", "seconds": … } }`;
+- writes a `SOURCES.md` skeleton (`| slot | file | url | author | licence |`, file and licence
+  filled) if none exists; an existing one is **never overwritten** — rows are appended only for
+  converted slots it does not list yet. Ciaran completes url and author; the patch is not done
+  until every row is filled.
+
+Exit **0** every slot converted (length warnings allowed); **1** any slot missing or unreadable,
+or any audio file that is an extra (matches no slot, or a second match for one) — whatever could
+be converted still is, and the manifest lists those; **2** usage error or no `SHOPPING.md`. A
+malformed table (wrong header, unknown length form, channels not mono/stereo, pitched not
+yes/no) aborts with the reason. Re-run after fixing.
 
 ## 5. Load in the patch
 

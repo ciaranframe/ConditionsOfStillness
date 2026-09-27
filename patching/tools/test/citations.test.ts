@@ -2,7 +2,11 @@
 // convention"): `token` (path:line) — the backticked token is a literal substring of that line.
 // Every citation whose path starts with airkit/ or patching/corpus/ is resolved against the MAIN
 // checkout (COS_MAIN_ROOT, default below), because airkit/ is a gitignored worktree and the raw
-// corpus is gitignored: neither exists inside a task worktree. Skips when the root is absent.
+// corpus is gitignored: neither exists inside a task worktree. Skips when the root is absent —
+// and a skip is NOT a pass: a run that reports skipped resolution tests has checked nothing; run
+// it from a checkout where airkit/ and patching/corpus/ exist (or set COS_MAIN_ROOT).
+// Checked docs: every references/*.md; engine.md must carry >= 40 citations, and every
+// engine-derived pitfalls.md entry (28 onwards) must carry at least one.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -43,6 +47,18 @@ test('references exist and engine.md carries citations', () => {
   assert.ok(docs.includes('engine.md'), `no engine.md under ${REFS}`);
   const { cited } = parseCitations('engine.md', readFileSync(join(REFS, 'engine.md'), 'utf8'));
   assert.ok(cited.length >= 40, `engine.md has only ${cited.length} checked citations`);
+});
+
+test('pitfalls.md: every entry from 28 on carries a citation', () => {
+  assert.ok(docs.includes('pitfalls.md'), `no pitfalls.md under ${REFS}`);
+  const text = readFileSync(join(REFS, 'pitfalls.md'), 'utf8');
+  const sections = text.split(/^## (?=\d+\. )/m).slice(1);
+  const uncited = sections
+    .map((sec) => ({ n: Number(sec.match(/^(\d+)\./)![1]), sec }))
+    .filter(({ n, sec }) => n >= 28 && parseCitations('pitfalls.md', sec).cited.length === 0)
+    .map(({ n }) => n);
+  assert.ok(sections.length >= 41, `pitfalls.md has only ${sections.length} numbered entries`);
+  assert.deepEqual(uncited, [], `pitfalls.md entries without a \`token\` (path:line) citation: ${uncited.join(', ')}`);
 });
 
 for (const doc of docs) {

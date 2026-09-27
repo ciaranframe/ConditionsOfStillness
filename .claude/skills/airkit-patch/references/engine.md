@@ -62,7 +62,7 @@ at file-body time and usable only inside hooks.
   `XFade2.ar(a, b, pan)` (airkit/code3.0/conditions/main_conditions.scd:83), and sums into the master. Capture it at file
   top (`var ob = ~outBus ? 0;`) — inside `topEnvironment.use` your `~outBus` is nil — and never
   assign it. The template's first comment block states this: `var ob = ~outBus ? 0` (airkit/personalities/COS_Template.sc:16).
-- `ctx` for state ticks is `topEnvironment[\stateCtx]`, here a constant stub; `~beatClock` runs at
+- `ctx` for state ticks is `topEnvironment[\stateCtx]`, a stub whose only changing field is `state` (`~stateCtx[\state] = new;` (airkit/code3.0/conditions/main_conditions.scd:55)); `~beatClock` runs at
   2 beats/s, so the upstream one-bar quant (`~scoreBeatsPerBar * ~scoreEventsPerBeat` = 8 beats)
   waits up to **4 s** before a pattern starts. Use a small quant (derived from the stub values).
 - Hooks that exist but never fire here: the nine beat hooks and `~onResync` — both are
@@ -194,7 +194,7 @@ the mute in `~init` from `topEnvironment[\roomState]`. Alias the other ticks to 
 Slot 9 has its own plain-gain monitor, `SynthDef(\cosAuditionMonitor` (airkit/code3.0/conditions/main_conditions.scd:87). The
 runner mirrors a wrist there (device port 9009); `patch-audition.ts` sends from its own source
 port so its device is 9109 with index 9 — same `~outBus`, same monitor. With two index-9 devices,
-`~cosDeviceForSlot` returns the first match, `~devices.values.detect { |d| d.index == slot }` (airkit/code3.0/conditions/main_conditions.scd:40),
+`~cosDeviceForSlot` returns an arbitrary one of the index-9 devices (Dictionary order), `~devices.values.detect { |d| d.index == slot }` (airkit/code3.0/conditions/main_conditions.scd:40),
 so a live params update may reach the other one; params stored before the load are read by
 whichever loads.
 
@@ -215,8 +215,10 @@ One-line guidance per key: `assets/header-template.txt`.
 - `gyroEvent`: Euler angles in radians from the quaternion, `sensors.gyroEvent = (` (airkit/code3.0/oscController.scd:316):
   x roll ±π, y pitch ±π/2 (clamped at `// gimbal lock handling` (airkit/code3.0/oscController.scd:208)), z yaw ±π.
 - `rrateEvent`: the wrapped change of each Euler angle **per packet**, `\x:angleDiff.value(rx, ox)` (airkit/code3.0/oscController.scd:329)
-  — radians per packet, not per tick, so its scale follows the packet rate (API.md says a
-  stick sends ~100 Hz; measure with takes). Near vertical, roll and yaw swing fast (gimbal
+  — radians per packet, not per tick, so its scale follows the packet rate. Two rates, often
+  confused: a stick streams packets at ~100 Hz, `~100 Hz IMU stream` (airkit/code3.0/API.md:28);
+  the engine *ticks* at ~33 Hz (§4). `patching/profile.md` once gave "~33 Hz" as the stream
+  rate — that is the tick. Measure the packet rate with takes. Near vertical, roll and yaw swing fast (gimbal
   lock): clamp rotation-rate inputs.
 - `velocity`: a leaky integral, `sensors.velocity, 0.3);` (airkit/code3.0/oscController.scd:349) — drifty; unused by anything.
 - Calibration: `/airkit/calibrate` is local-only, `'/airkit/calibrate', NetAddr("127.0.0.1"` (airkit/code3.0/oscController.scd:467); when set,

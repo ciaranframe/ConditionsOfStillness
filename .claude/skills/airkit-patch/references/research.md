@@ -77,7 +77,8 @@ argument lists verified, a CPU estimate method (the audition prints `serverCpu`)
 guards (clip, `LeakDC`, ceilings).
 
 **F — Steph's corpus.** What has already been built on this engine that is close to the brief?
-The mined corpus is 574 files from five AirKit branches (`patching/corpus/stats.md`).
+The mined corpus is 574 entries (561 unique blobs) from five AirKit branches
+(`patching/corpus/stats.md`).
 
 - `patching/corpus/INDEX.md` — per branch, a table of name, idiom (`pdef`/`synth`/`hybrid`/
   `ndef`/`none`), UGen count, samples, size, other branches. Skim for names and idioms.

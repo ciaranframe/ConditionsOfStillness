@@ -20,8 +20,9 @@ meet to run in the room).
 ## Piece and instruments
 
 Zubin (piano) and Claire (bass drum) each wear one AirStick on each wrist — four sticks in all:
-`ZL`, `ZR`, `CL`, `CR`. A stick streams its wrist's motion (accelerometer + gyroscope) at ~33 Hz;
-a patch reads it as `~model`, not as "the piano" or "the drum" — the gesture is all it gets.
+`ZL`, `ZR`, `CL`, `CR`. A stick streams its wrist's motion (accelerometer + gyroscope) at
+~100 Hz; the engine ticks at ~33 Hz. A patch reads that motion as `~model`, not as "the piano"
+or "the drum" — the gesture is all it gets.
 
 What playing looks like to the IMU: over the keys, ordinary playing is small, fairly fast
 vertical accelerations; a rolled or voiced chord turns the wrist as it's played; a tremolo shows
