@@ -4,11 +4,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { formatIssue, knownClasses, lint, lintSource, loadProfile, type Issue } from '../src/lint.ts';
+import { formatIssue, knownClasses, CLASS_DIRS, lint, lintSource, loadProfile, type Issue } from '../src/lint.ts';
 import { personalityPath, repoRoot } from '../src/sc.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -149,6 +149,30 @@ test('partner.guard: ~partner.env !? { … } alone is not a guard (it throws whe
   fires(fix(envOnly, 'COS_Fixture2H'), 'partner.guard', 'E');
 });
 
+test('partner.guard: a guarded read that is not the first statement of its block passes', () => {
+  const idle = /~idleNext = \{[\s\S]*?\n\};\n/.exec(BASE)![0];
+  const ifGuard = sub(BASE, idle, '~idleNext = { |d, ctx|\n\tif (~partner.notNil) {\n\t\tvar mine = m.accelMass;\n\t\tvar theirs = ~partner.env[\\model];\n\t\tmine + theirs.accelMass;\n\t};\n};\n');
+  quiet(fix(ifGuard, 'COS_Fixture2H'), 'partner.guard');
+  const nilSafe = sub(BASE, idle, '~idleNext = { |d, ctx|\n\t~partner !? {\n\t\tvar a = 1;\n\t\tvar pm = ~partner.env[\\model];\n\t\tpm.accelMass + a;\n\t};\n};\n');
+  quiet(fix(nilSafe, 'COS_Fixture2H'), 'partner.guard');
+  const nested = sub(BASE, idle, '~idleNext = { |d, ctx|\n\tif (~partner.notNil) {\n\t\tvar a = 1;\n\t\tif (a > 0) {\n\t\t\tvar b = 2;\n\t\t\tvar pm = ~partner.env[\\model];\n\t\t};\n\t};\n};\n');
+  quiet(fix(nested, 'COS_Fixture2H'), 'partner.guard');
+});
+
+test('partner.guard: an unguarded read at block depth 2 still fails', () => {
+  const idle = /~idleNext = \{[\s\S]*?\n\};\n/.exec(BASE)![0];
+  const src = sub(BASE, idle, '~idleNext = { |d, ctx|\n\tvar x = m.accelMass;\n\tif (x > 0.1) {\n\t\tvar a = 1;\n\t\tvar pm = ~partner.env[\\model];\n\t};\n};\n');
+  fires(fix(src, 'COS_Fixture2H'), 'partner.guard', 'E');
+  const sibling = sub(BASE, idle, '~idleNext = { |d, ctx|\n\tif (~partner.notNil) { d.postln };\n\tif (d.notNil) {\n\t\tvar a = 1;\n\t\tvar pm = ~partner.env[\\model];\n\t};\n};\n');
+  fires(fix(sibling, 'COS_Fixture2H'), 'partner.guard', 'E');
+});
+
+test('stripNonCode: an escaped char literal $\\" does not open a string', () => {
+  const issues = fix(atTop(BASE, '~q = $\\";'));
+  quiet(issues, 'hooks.required');
+  assert.deepEqual(errors(issues).map(formatIssue), []);
+});
+
 test('style.compose: ~init that clobbers instead of composing', () => {
   fires(fix(sub(BASE, INIT, '\n~init = { |d|\n')), 'style.compose', 'W');
 });
@@ -211,13 +235,13 @@ test('sample.manifest: a path traced one hop to cosSamples passes; one hop to a 
   fires(later, 'sample.manifest', 'E'); // assigned only after the read
 });
 
-test('Review Focus 2: fixture file declaring samples: with a literal path fails via the CLI', () => {
+test('CLI: a fixture file loading a sample from a literal path fails sample.manifest (exit 1)', () => {
   const r = spawnSync(process.execPath, [CLI, join(FIXTURES, 'COS_LiteralSample.sc')], { encoding: 'utf8' });
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stdout, /^\[E\] sample\.manifest — .*COS_LiteralSample\.sc:\d+ — /m);
 });
 
-test('Review Focus 2: fixture file named 2H that never reads ~partner fails via the CLI', () => {
+test('CLI: a fixture file named 2H that never reads ~partner fails name.two-hand (exit 1)', () => {
   const r = spawnSync(process.execPath, [CLI, join(FIXTURES, 'COS_Lonely2H.sc')], { encoding: 'utf8' });
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stdout, /^\[E\] name\.two-hand — /m);
@@ -264,6 +288,21 @@ test('class index: Quaternion (Extensions) and MdaPiano (SC3plugins) resolve; No
   assert.ok(!classes.has('NoSuchUGen'));
 });
 
+test('class index: includePaths from sclang_conf.yaml are indexed, through symlinks too', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cos-lint-include-'));
+  const inc = join(dir, 'quark');
+  mkdirSync(join(inc, 'Classes'), { recursive: true });
+  writeFileSync(join(inc, 'Classes', 'CosLintProbe.sc'), 'CosLintProbe : Object {\n\t*new { ^super.new }\n}\n');
+  symlinkSync(join(inc, 'Classes'), join(dir, 'linked'));
+  const conf = join(dir, 'sclang_conf.yaml');
+  writeFileSync(conf, 'includePaths:\n    -   ' + join(dir, 'linked') + '\nexcludePaths:\n    []\n');
+  assert.ok(!knownClasses(CLASS_DIRS, true, null).has('CosLintProbe'));
+  assert.ok(knownClasses(CLASS_DIRS, true, conf).has('CosLintProbe'));
+  const src = inTick(BASE, 'var z = CosLintProbe.new;');
+  fires(lintSource('COS_Fixture', src, { sclangConf: null }), 'class.unknown', 'E');
+  quiet(lintSource('COS_Fixture', src, { sclangConf: conf }), 'class.unknown');
+});
+
 test('class.unknown: NoSuchUGen fails; MdaPiano passes', () => {
   fires(fix(inTick(BASE, 'var z = NoSuchUGen.ar(1);')), 'class.unknown', 'E');
   quiet(fix(atTop(BASE, 'SynthDef(\\cosFixturePiano, { Out.ar(0, MdaPiano.ar(440)) }).add;')), 'class.unknown');
@@ -271,7 +310,7 @@ test('class.unknown: NoSuchUGen fails; MdaPiano passes', () => {
 
 test('class.library-not-found: no class library on the configured path warns and skips', () => {
   const empty = mkdtempSync(join(tmpdir(), 'cos-lint-classes-'));
-  const issues = lintSource('COS_Fixture', inTick(BASE, 'var z = NoSuchUGen.ar(1);'), { classDirs: [empty] });
+  const issues = lintSource('COS_Fixture', inTick(BASE, 'var z = NoSuchUGen.ar(1);'), { classDirs: [empty], sclangConf: null });
   fires(issues, 'class.library-not-found', 'W');
   quiet(issues, 'class.unknown');
 });
@@ -332,6 +371,16 @@ test('CLI: --json prints an array of {id, severity, file, line, message}', () =>
   const clean = spawnSync(process.execPath, [CLI, 'COS_Template', '--json'], { encoding: 'utf8' });
   assert.equal(clean.status, 0);
   assert.deepEqual(JSON.parse(clean.stdout), []);
+});
+
+test('CLI: --json failures print {"error"} on stdout and exit 2', () => {
+  for (const argv of [['COS_DoesNotExist', '--json'], ['COS_Template', '--json', '--profile', '/nonexistent/profile.md'], ['--json']]) {
+    const r = spawnSync(process.execPath, [CLI, ...argv], { encoding: 'utf8' });
+    assert.equal(r.status, 2, argv.join(' '));
+    const out = JSON.parse(r.stdout) as { error: string };
+    assert.equal(typeof out.error, 'string');
+    assert.ok(out.error.length > 0);
+  }
 });
 
 test('CLI: exit 2 on usage error and on a missing file', () => {

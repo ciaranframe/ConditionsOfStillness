@@ -10,7 +10,7 @@
 // engine's SynthDef names); issues carry {id, severity E|W, file, line, message}.
 // Rule list and rationale: plan ruling 6 and the Task 3 brief; the engine contract they encode is
 // airkit/code3.0/API.md "[COS] Personality contract additions" and spec §5 / §5.1.
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parse } from 'yaml';
@@ -33,7 +33,9 @@ export type Profile = {
   gestureWords: string[];
 };
 
-export type LintOptions = { profile?: Profile; classDirs?: string[]; file?: string };
+// classDirs overrides CLASS_DIRS; sclangConf is the sclang_conf.yaml whose includePaths are also
+// indexed (default: the user's; null = none).
+export type LintOptions = { profile?: Profile; classDirs?: string[]; sclangConf?: string | null; file?: string };
 
 export const CLASS_DIRS = [
   '/Applications/SuperCollider.app/Contents/Resources/SCClassLibrary',
@@ -42,6 +44,7 @@ export const CLASS_DIRS = [
 ];
 // Defined by the engine itself (airkit/code3.0/conditions/main_conditions.scd); also rescanned
 // from that folder when it exists, so a new engine SynthDef is caught without editing this list.
+export const SCLANG_CONF = join(homedir(), 'Library/Application Support/SuperCollider/sclang_conf.yaml');
 const ENGINE_SYNTHDEFS = ['cosWristMonitor', 'cosAuditionMonitor', 'cosMaster'];
 const REQUIRED_HOOKS = ['~init', '~deinit', '~onRoomState', '~idleNext'];
 const STATE_TICKS = ['~tuningNext', '~pieceNext', '~curtainNext'];
@@ -117,7 +120,11 @@ export function stripNonCode(src: string, keep: { symbols?: boolean; strings?: b
       const isString = c === '"';
       if (!(isString ? keep.strings : keep.symbols)) blank(i + 1, Math.min(j, src.length));
       i = j + 1;
-    } else if (c === '$') { if (!keep.strings) blank(i, i + 2); i += 2; }
+    } else if (c === '$') { // char literal; $\" (escaped) is three characters
+      const len = src[i + 1] === '\\' ? 3 : 2;
+      if (!keep.strings) blank(i, i + len);
+      i += len;
+    }
     else if (c === '\\' && /[A-Za-z_]/.test(n ?? '')) {
       let j = i + 1; while (j < src.length && /\w/.test(src[j]!)) j++;
       if (!keep.symbols) blank(i + 1, j);
@@ -150,20 +157,38 @@ function closeParen(code: string, open: number): number {
   return j;
 }
 
-function walk(dir: string, plugins: boolean, out: string[] = []): string[] {
+// Follows symlinks (an extension dir is often a link to a checkout); realpaths guard against loops.
+function walk(dir: string, plugins: boolean, out: string[] = [], seen = new Set<string>()): string[] {
   if (!existsSync(dir)) return out;
+  const real = realpathSync(dir);
+  if (seen.has(real)) return out;
+  seen.add(real);
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
-    if (e.isDirectory()) { if (plugins || e.name !== 'SC3plugins') walk(p, plugins, out); }
-    else if (e.name.endsWith('.sc') && !e.name.startsWith('._')) out.push(p);
+    let isDir = e.isDirectory(), isFile = e.isFile();
+    if (e.isSymbolicLink()) {
+      try { const st = statSync(p); isDir = st.isDirectory(); isFile = st.isFile(); } catch { continue; } // dangling link
+    }
+    if (isDir) { if (plugins || e.name !== 'SC3plugins') walk(p, plugins, out, seen); }
+    else if (isFile && e.name.endsWith('.sc') && !e.name.startsWith('._')) out.push(p);
   }
   return out;
+}
+
+/** includePaths from an sclang_conf.yaml (none when the file is absent or unreadable). */
+export function confIncludePaths(conf: string | null): string[] {
+  if (!conf || !existsSync(conf)) return [];
+  try {
+    const y = parse(readFileSync(conf, 'utf8')) as { includePaths?: unknown } | null;
+    return Array.isArray(y?.includePaths) ? y!.includePaths.filter((p): p is string => typeof p === 'string') : [];
+  } catch { return []; }
 }
 
 const classCache = new Map<string, Set<string>>();
 
 /** Every class the installed SuperCollider can compile: what a patch may reference on THIS machine. */
-export function knownClasses(dirs: string[] = CLASS_DIRS, plugins = true): Set<string> {
+export function knownClasses(dirs: string[] = CLASS_DIRS, plugins = true, sclangConf: string | null = SCLANG_CONF): Set<string> {
+  dirs = [...dirs, ...confIncludePaths(sclangConf)];
   const key = `${plugins}|${dirs.join('|')}`;
   const cached = classCache.get(key);
   if (cached) return cached;
@@ -199,6 +224,30 @@ function readsPartnerData(code: string): boolean {
   }
   for (const m of code.matchAll(/\b(\w+)\s*=\s*~partner\b(?!\s*\.)/g)) {
     if (new RegExp(`\\b${m[1]}${field}`).test(code.slice(m.index! + m[0].length))) return true;
+  }
+  return false;
+}
+
+// A ~partner.env read at `at` is guarded when (1) its own ;-delimited statement holds a guard, or
+// (2) some enclosing { } block is headed by one: the text just before that `{` (up to 80 chars,
+// not crossing a `;` or the parent block's `{`) contains ~partner.notNil / ~partner !? /
+// ~partner ??. (Reads through `p` in `~partner !? { |p| p.env[\model] }` never reach here.)
+// Known gap: an else-branch `if (~partner.notNil) { … } { read }` sees the if's head too.
+function partnerGuarded(code: string, at: number): boolean {
+  const start = code.lastIndexOf(';', at) + 1;
+  const endAt = code.indexOf(';', at);
+  if (/~partner\s*!\?\s*\{|~partner\s*\.\s*notNil\b|~partner\s*\?\?\s*\{/.test(code.slice(start, endAt < 0 ? code.length : endAt))) return true;
+  const opens: number[] = [];
+  let depth = 0;
+  for (let j = at - 1; j >= 0; j--) {
+    if (code[j] === '}') depth++;
+    else if (code[j] === '{') { if (depth === 0) opens.push(j); else depth--; }
+  }
+  for (let k = 0; k < opens.length; k++) {
+    const brace = opens[k]!;
+    const parent = opens[k + 1] ?? -1;
+    const from = Math.max(brace - 80, parent + 1, code.lastIndexOf(';', brace) + 1);
+    if (/~partner\s*\.\s*notNil\b|~partner\s*!\?\s*$|~partner\s*\?\?\s*$/.test(code.slice(from, brace))) return true;
   }
   return false;
 }
@@ -316,10 +365,7 @@ export function lintSource(name: string, src: string, opts: LintOptions = {}): I
         const after = codeSym.slice(m.index! + m[0].length - 1, m.index! + m[0].length + 8);
         if (!/^\\model\b/.test(after)) continue;
       }
-      const start = code.lastIndexOf(';', m.index!) + 1;
-      const endAt = code.indexOf(';', m.index!);
-      const stmt = code.slice(start, endAt < 0 ? code.length : endAt);
-      if (!/~partner\s*!\?\s*\{|~partner\s*\.\s*notNil\b|~partner\s*\?\?\s*\{/.test(stmt)) {
+      if (!partnerGuarded(code, m.index!)) {
         add('partner.guard', 'E', lineOf(code, m.index!), 'Reads ~partner.env[\\model] without a nil guard — a tick can land before ~init sets ~partner (use ~partner !? { |p| ... } or if (~partner.notNil)).');
       }
     }
@@ -414,7 +460,7 @@ export function lintSource(name: string, src: string, opts: LintOptions = {}): I
   each('pdef.literal-name', 'W', code, /\b(Pdef|Pdefn|Ndef|Tdef)\s*\(\s*\\/, 'A literal Pdef/Ndef/Tdef key is shared by every slot running this patch — key it per device (e.g. with m.ptn).');
 
   // --- classes this machine cannot compile (hallucinated UGens, missing plugins) ---
-  const classes = knownClasses(opts.classDirs ?? CLASS_DIRS, profile.plugins);
+  const classes = knownClasses(opts.classDirs ?? CLASS_DIRS, profile.plugins, opts.sclangConf === undefined ? SCLANG_CONF : opts.sclangConf);
   if (classes.size < MIN_LIBRARY_CLASSES) add('class.library-not-found', 'W', 1, 'SuperCollider class library not found — unknown-class check skipped.');
   else {
     const seen = new Set<string>();
