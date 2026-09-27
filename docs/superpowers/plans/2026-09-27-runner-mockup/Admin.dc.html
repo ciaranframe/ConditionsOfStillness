@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Admin — Ciaran's iPad at the desk</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'IBM Plex Sans',system-ui,sans-serif;background:#000000;color:#ffffff}
+a{color:#ffffff}a:hover{color:#ffffff}
+button{font-family:inherit}
+input[type=range]{accent-color:#ffffff}
+</style>
+</helmet>
+<div style="width: 1194px; height: 834px; box-sizing: border-box; background: #000000; color: #ffffff; display: flex; flex-direction: column; gap: 12px; padding: 14px">
+
+  <div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; height: 56px">
+    <sc-for list="{{status}}" as="st" hint-placeholder-count="7">
+      <div style="display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 6px 10px; border-radius: 4px; background: {{st.bg}}; color: {{st.fg}}; border: 2px solid {{st.border}}">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.12em; opacity: 0.85">{{st.label}}</div>
+        <div style="font-size: 17px; font-weight: 700; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{st.value}}</div>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 290px minmax(0, 1fr) 290px; gap: 12px; flex-grow: 1; min-height: 0">
+
+    <div style="display: flex; flex-direction: column; gap: 8px; min-height: 0">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.14em; color: #b8b8b8">SCENES</div>
+      <div style="display: flex; flex-direction: column; gap: 5px; flex-grow: 1; overflow: hidden">
+        <sc-for list="{{scenes}}" as="s" hint-placeholder-count="7">
+          <button onClick="{{s.jump}}" aria-label="Jump to scene" style="display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 6px 10px; border-radius: 4px; border: 2px solid {{s.border}}; background: {{s.bg}}; color: #ffffff; text-align: left; cursor: pointer">
+            <div style="font-family: 'IBM Plex Mono', monospace; font-size: 26px; font-weight: 700; width: 34px">{{s.id}}</div>
+            <div style="display: flex; flex-direction: column; gap: 1px; flex-grow: 1; min-width: 0">
+              <div style="font-size: 15px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{s.name}}</div>
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #b8b8b8">{{s.sub}}</div>
+            </div>
+            <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600; padding: 3px 6px; border-radius: 3px; background: {{s.tagBg}}; color: {{s.tagFg}}">{{s.tag}}</div>
+          </button>
+        </sc-for>
+      </div>
+      <div style="display: flex; gap: 8px">
+        <button aria-label="Back one scene" style="flex-grow: 1; height: 50px; border-radius: 4px; border: 2px solid #5a5a5a; background: #1a1a1a; color: #ffffff; font-size: 15px; font-weight: 600; cursor: pointer">BACK</button>
+        <button aria-label="Next scene" style="flex-grow: 2; height: 50px; border-radius: 4px; border: 2px solid #ffffff; background: #ffffff; color: #000000; font-size: 15px; font-weight: 700; cursor: pointer">NEXT: SCENE E</button>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-radius: 4px; background: #0e0e0e; border: 2px solid #3a3a3a">
+        <div style="display: flex; align-items: baseline; gap: 14px">
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.14em; color: #b8b8b8">SCENE</div>
+          <div style="font-size: 64px; font-weight: 700; line-height: 0.95">D</div>
+          <div style="font-size: 28px; font-weight: 600">Glass</div>
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #b8b8b8">fade 6.0 s · 4 of 7</div>
+        </div>
+        <div style="display: flex; align-items: baseline; gap: 10px">
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.14em; color: #b8b8b8">NEXT</div>
+          <div style="font-size: 40px; font-weight: 700; line-height: 0.95">E</div>
+          <div style="font-size: 20px">Undertow</div>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; flex-grow: 1; min-height: 0">
+        <sc-for list="{{sticks}}" as="w" hint-placeholder-count="4">
+          <div style="display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 4px; background: #0e0e0e; border: 2px solid {{w.border}}; min-width: 0">
+            <div style="display: flex; justify-content: space-between; align-items: baseline">
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 24px; font-weight: 600">{{w.name}}</div>
+              <div style="font-size: 12px; color: #b8b8b8">{{w.who}}</div>
+            </div>
+            <div style="font-size: 15px; font-weight: 500; color: {{w.patchColor}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{w.patch}}</div>
+            <div style="display: flex; align-items: center; gap: 8px">
+              <div style="padding: 4px 8px; border-radius: 3px; background: {{w.stateBg}}; color: #000000; font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; white-space: nowrap">{{w.state}}</div>
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: {{w.battColor}}">{{w.batt}}</div>
+            </div>
+            <div style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #b8b8b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{w.detail}}</div>
+            <div style="display: flex; gap: 10px; flex-grow: 1; align-items: stretch; min-height: 150px">
+              <div style="display: flex; flex-direction: column; gap: 4px; align-items: center">
+                <div style="width: 16px; flex-grow: 1; border-radius: 2px; background: #1a1a1a; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden">
+                  <div style="width: 16px; height: {{w.rms}}; background: #2fbf6b"></div>
+                </div>
+                <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #b8b8b8">{{w.peak}}</div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 4px; align-items: center; flex-grow: 1">
+                <label style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #b8b8b8">LEVEL</label>
+                <div style="flex-grow: 1; width: 100%; display: flex; align-items: center; justify-content: center">
+                  <input type="range" min="-30" max="6" value="{{w.level}}" aria-label="Stick level in dB" style="width: 130px; transform: rotate(-90deg)">
+                </div>
+                <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px">{{w.levelLabel}}</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 6px">
+              <button aria-label="Audition a patch on this stick" style="flex-grow: 1; height: 40px; border-radius: 4px; border: 2px solid #5a5a5a; background: #1a1a1a; color: #ffffff; font-size: 12px; font-weight: 600; cursor: pointer">AUDITION</button>
+              <button aria-label="Reload this stick's patch" style="flex-grow: 1; height: 40px; border-radius: 4px; border: 2px solid #5a5a5a; background: #1a1a1a; color: #ffffff; font-size: 12px; font-weight: 600; cursor: pointer">RELOAD</button>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 3px; padding: 8px 12px; border-radius: 4px; background: #0e0e0e; border: 2px solid #2a2a2a; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #b8b8b8; height: 84px; overflow: hidden">
+        <div>20:41:03  cue next → D Glass (fade 6.0)</div>
+        <div>20:41:03  A4: xfade slot 4 → slot 3, COS_Breath → COS_Glass</div>
+        <div>20:41:03  A3: preload slot 2 ← COS_Undertow2H (register=low)</div>
+        <div style="color: #f0b429">20:41:05  B1: battery 14%</div>
+        <div>20:41:06  airkit: status ok · cpu 21% · limiter idle</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 10px; min-height: 0">
+      <div style="display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 4px; background: #0e0e0e; border: 2px solid #3a3a3a">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.14em; color: #b8b8b8">SLOTS</div>
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px">
+          <sc-for list="{{slots}}" as="sl" hint-placeholder-count="9">
+            <div style="display: flex; flex-direction: column; gap: 2px; padding: 5px 7px; border-radius: 3px; background: #1a1a1a; border: 2px solid {{sl.border}}">
+              <div style="display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600"><div>{{sl.n}}</div><div style="color: #b8b8b8; font-weight: 400">{{sl.stick}}</div></div>
+              <div style="font-size: 11px; color: {{sl.color}}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{sl.name}}</div>
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #b8b8b8">tick {{sl.tick}}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 4px; background: #0e0e0e; border: 2px solid #3a3a3a">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.14em; color: #b8b8b8">ENGINE</div>
+        <sc-for list="{{engine}}" as="e" hint-placeholder-count="5">
+          <div style="display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 12px">
+            <div style="color: #b8b8b8">{{e.k}}</div>
+            <div>{{e.v}}</div>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 4px; background: #0e0e0e; border: 2px solid #3a3a3a">
+        <div style="display: flex; justify-content: space-between; align-items: baseline">
+          <label for="master" style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.14em; color: #b8b8b8">MASTER</label>
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600">−3.0 dB</div>
+        </div>
+        <input id="master" type="range" min="-30" max="6" value="-3" style="width: 100%">
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-top: auto">
+        <button aria-label="Panic: silence every stick" style="flex-grow: 1; height: 56px; border-radius: 4px; border: 2px solid #e5484d; background: #e5484d; color: #000000; font-size: 16px; font-weight: 700; cursor: pointer">PANIC</button>
+        <button aria-label="Open the Perform view" style="flex-grow: 1; height: 56px; border-radius: 4px; border: 2px solid #5a5a5a; background: #1a1a1a; color: #ffffff; font-size: 13px; font-weight: 600; cursor: pointer">PERFORM VIEW</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1194,"height":834}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { current: 3 };
+  }
+  renderVals() {
+    const GREEN = '#2fbf6b', AMBER = '#f0b429', RED = '#e5484d';
+    const cell = (label, value, bg) => ({ label, value, bg, fg: '#000000', border: bg });
+    const status = [
+      cell('PEDAL', 'OK', GREEN),
+      cell('STICKS', '4 / 4', GREEN),
+      cell('AIRKIT', 'OK', GREEN),
+      cell('AUDIO', 'OK', GREEN),
+      cell('BATTERY', 'B1 14%', AMBER),
+      cell('CPU', '21%', GREEN),
+      { label: 'CLOCK', value: '20:41:07', bg: '#0e0e0e', fg: '#ffffff', border: '#3a3a3a' }
+    ];
+    const names = [
+      ['A', 'Opening stillness', 'fade 6.0 · A3 A4 B2'],
+      ['B', 'First strike', 'fade 0.1 · Claire 2H'],
+      ['C', 'Held breath', 'fade 4.0 · A4'],
+      ['D', 'Glass', 'fade 6.0 · all'],
+      ['E', 'Undertow', 'fade 2.0 · Zubin 2H · B1'],
+      ['F', 'Skin and bone', 'fade 0.5 · A4 Claire'],
+      ['G', 'Stillness II', 'fade 10.0 · all']
+    ];
+    const cur = this.state.current;
+    const scenes = names.map((n, i) => ({
+      id: n[0], name: n[1], sub: n[2],
+      bg: i === cur ? '#1a1a1a' : '#0e0e0e',
+      border: i === cur ? '#ffffff' : '#2a2a2a',
+      tag: i === cur ? 'NOW' : (i === cur + 1 ? 'NEXT' : ''),
+      tagBg: i === cur ? '#ffffff' : (i === cur + 1 ? '#3a3a3a' : 'transparent'),
+      tagFg: i === cur ? '#000000' : '#ffffff',
+      jump: () => this.setState({ current: i })
+    }));
+    const sticks = [
+      { name: 'A3', who: 'Zubin · left', patch: 'COS_Glass', patchColor: '#ffffff', state: 'OK', stateBg: GREEN, batt: '81%', battColor: '#b8b8b8', detail: 'register=low · slot 1 live', rms: '46%', peak: '−14 dB', level: 0, levelLabel: '0.0 dB', border: '#3a3a3a' },
+      { name: 'A4', who: 'Zubin · right', patch: 'COS_Breath → COS_Glass', patchColor: '#ffffff', state: 'FADING 62%', stateBg: AMBER, batt: '79%', battColor: '#b8b8b8', detail: 'slot 4 → 3 · 6.0 s', rms: '58%', peak: '−9 dB', level: 0, levelLabel: '0.0 dB', border: AMBER },
+      { name: 'B1', who: 'Claire · left', patch: 'silence', patchColor: '#8a8a8a', state: 'SILENT', stateBg: '#5a5a5a', batt: '14%', battColor: AMBER, detail: 'slot 5 · preload COS_Skin', rms: '0%', peak: '−inf', level: 0, levelLabel: '0.0 dB', border: '#3a3a3a' },
+      { name: 'B2', who: 'Claire · right', patch: 'COS_Skin', patchColor: '#ffffff', state: 'OK', stateBg: GREEN, batt: '88%', battColor: '#b8b8b8', detail: 'level −6 dB · slot 7 live', rms: '22%', peak: '−20 dB', level: -6, levelLabel: '−6.0 dB', border: '#3a3a3a' }
+    ];
+    const engine = [
+      { k: 'airkit', v: 'online · 57120' },
+      { k: 'runner', v: 'scene D · pedal ok' },
+      { k: 'server cpu', v: '21%' },
+      { k: 'limiter', v: 'idle' },
+      { k: 'sticks', v: '4 of 4 streaming' }
+    ];
+    const slots = [
+      { n: '1', stick: 'A3', name: 'COS_Glass', color: '#ffffff', tick: '31 ms', border: '#3a3a3a' },
+      { n: '2', stick: 'A3', name: 'COS_Undertow2H', color: '#b8b8b8', tick: '30 ms', border: '#3a3a3a' },
+      { n: '3', stick: 'A4', name: 'COS_Glass', color: '#ffffff', tick: '29 ms', border: AMBER },
+      { n: '4', stick: 'A4', name: 'COS_Breath', color: '#b8b8b8', tick: '31 ms', border: AMBER },
+      { n: '5', stick: 'B1', name: 'silence', color: '#8a8a8a', tick: '30 ms', border: '#3a3a3a' },
+      { n: '6', stick: 'B1', name: 'COS_Skin', color: '#b8b8b8', tick: '30 ms', border: '#3a3a3a' },
+      { n: '7', stick: 'B2', name: 'COS_Skin', color: '#ffffff', tick: '32 ms', border: '#3a3a3a' },
+      { n: '8', stick: 'B2', name: 'silence', color: '#8a8a8a', tick: '30 ms', border: '#3a3a3a' },
+      { n: '9', stick: 'aud', name: 'silence', color: '#8a8a8a', tick: '30 ms', border: '#3a3a3a' }
+    ];
+    return { status, scenes, sticks, engine, slots };
+  }
+}
+</script>
+</body>
+</html>
