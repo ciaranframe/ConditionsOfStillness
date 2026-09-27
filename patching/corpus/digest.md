@@ -82,7 +82,7 @@ acceleration → decay, tilt → register. Older files also read single accelero
 (default clock, so `w` is seconds). Accents on top of a running pattern use a higher threshold
 (cotf_test1); one file steals its single accent voice (release the last, start the next).
 *Here:* drum strokes. The raw, signed axis is the only form that sees stroke *direction*; a
-55 ms window is shorter than the ~50–100 ms rebound `patterns.md` infers — calibrate on a take.
+55 ms window is at the short end of the ~50–100 ms rebound — it may double-fire; calibrate on a take.
 `if (m.accelMassFiltered > 0.5, {` (AirConcert/personalities/cotf_drums1.sc:174),
 `if(d.sensors.accelEvent.x > (1.0 * sens), {` (Airsticks-RPI/personalities/trainMove2.sc:406),
 `if(TempoClock.beats > (lastTime + 0.055),{` (Airsticks-RPI/personalities/trainMove2.sc:408),
@@ -206,6 +206,9 @@ pattern spends; the rectified derivative of a feature is an onset measure.
 event (the sound keeps the angle it was struck at); a per-device sensitivity param scaling
 every threshold — the only prior art for scene params; loudness compensation across register;
 a string grid DSL for drum patterns (`K`/`k`/`.`/digits = full/ghost/rest/level).
+*Here:* a piano attack that keeps the forearm angle it was struck at; one scene param
+(`density` or a sensitivity) scaling every threshold, after trainMove2; loudness compensation
+for a patch that spans the keyboard's register; the grid DSL for a scored bass-drum figure.
 `var hg = d.sensors.gyroEvent;` (Airsticks-RPI/personalities/trainMove2.sc:419),
 `var sens = d.params.sensitivity;` (Airsticks-RPI/personalities/trainMove2.sc:380),
 `freqComp = { |freq| (2000 / freq).sqrt.clip(0.45, 1.3) };` (AirConcert/personalities/BIRDY.sc:269),
@@ -291,10 +294,12 @@ PLUKSYNTH, RainKeys, STRINGCHORD, WINDY, SOPRANOVOICE, cotf_drums1 (2–4 by dif
 cascade1, whisperer1, test2, simple1; dulcimer1, test1, WindVoice in large part; headers and
 targeted reads of Birdsong, WHIPBIRD, celesta1, harpsichord1, marimba1/2, simple3, voice1. Older:
 Airsticks-RPI `_TEMPLATE_ak_pfile`, funBass, wingChimes1, LR_pitch, ROLL_duration,
-UD_pitchDynamics2, swing1, droplet, ndefTest1, violin2, metal1 and trainMove2 (the largest; key
-blocks), insects1 (most UGens; skim), `synths/membraneDrum`, `synths/pianoSamplerExample`;
+UD_pitchDynamics2, swing1, droplet, ndefTest1, violin2, metal1 and trainMove2 (the largest
+pre-COTF file; key blocks), insects1 (most UGens; skim), `synths/membraneDrum`, `synths/pianoSamplerExample`;
 master pluck1, rain, timDrums; MiMBrentonShows eve3, energy. Chosen by: the AirConcert set,
 largest files, most UGens, every idiom (`ndef`, `hybrid`, `none`), `~onHit`/`~onMoving`/`isHit`
-users, gyroZ and threshold readers, sample users, every branch. Every pointer was checked by a
+users, gyroZ and threshold readers, sample users. No Airsticks-Desktop file was read on its own:
+its blobs overlap Airsticks-RPI's (174 of its 254 are identical, filed under RPI in
+`index.json`), so the RPI reads stand in for it. Every pointer was checked by a
 script (the equivalent of `grep -n`): line *n* of `patching/corpus/<path>` in the main checkout
 contains the backticked text; lint counts are `patch-lint.ts --json` over the 459 (2026-09-27).

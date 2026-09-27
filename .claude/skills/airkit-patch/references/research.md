@@ -73,7 +73,7 @@ needs, stability limits, CPU relative to alternatives. sc3-plugins are installed
 `NHHall`, STK…). Budget: **eight patches run all the time** (four wrists × live + standby) at
 blockSize 128, so one copy should be a small fraction of scsynth's load; prefer control-rate
 modulation, a bounded voice count, one shared effect per patch. Return UGen choices with
-argument lists verified, a CPU estimate method (the audition prints `serverCpu`), stability
+argument lists verified, a CPU estimate method (the audition prints `server cpu (max)`), stability
 guards (clip, `LeakDC`, ceilings).
 
 **F — Steph's corpus.** What has already been built on this engine that is close to the brief?

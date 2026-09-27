@@ -99,17 +99,18 @@ Workflow: **context** (profile + every file in `patching/context/`) → **resear
 in parallel: physics, synthesis prior art, musical world, gesture, SuperCollider practice,
 Steph's corpus) → **note** (`patching/notes/COS_<Name>.md`) → **patch** (copied from
 `airkit/personalities/COS_Template.sc`, written to a `.tmp` and moved into place — the engine
-hot-loads on save) → **compile** → **lint** → **roster** (then commit `cos: …` in `airkit/`, push
-`mirror`, update `airkit.lock`) → **audition** on slot 9 → **samples** (only if the header
-declares slots) → **hand-off** in piano and drum terms → iterate on notes.
+hot-loads on save; compile and lint check the `.tmp` before the move) → **compile** → **lint** →
+**roster** → **audition** on slot 9 → **commit** `cos: …` in `airkit/`, push `mirror`, update
+`airkit.lock` (only after `AUDITION PASS`) → **samples** (only if the header declares slots) →
+**hand-off** in piano and drum terms → iterate on notes.
 
 | Tool | Does | Command |
 |---|---|---|
 | `patch-compile.ts` | headless sclang parse check (~3 s), never executes the patch; takes the `.sc.tmp` before the `mv` | `npm run patch:compile -- <Name\|path>` |
 | `patch-lint.ts` | static rules from the profile: header, naming, hooks, scene params, `~partner`, tick safety, sample paths, SynthDef names, unknown classes, roster | `npm run patch:lint -- <Name> [--json]` |
 | `patch-roster.ts` | adds/removes/lists patches in `airkit/lists/list_conditions.sc`, atomically | `npm run patch:roster -- add\|remove <Name>` / `list` |
-| `patch-audition.ts` | plays a patch on audition slot 9 with synthetic gestures or a take; peak/RMS per phase, errors, silence on unload | `npm run patch:audition -- <Name> [--quick\|--long\|--take <label>] [--params k=v,…]` |
-| `take-record.ts` | records one wrist's IMU stream to `takes/<label>.take.jsonl` | `npm run take:record -- <label> --wrist ZL [--seconds 30]` |
+| `patch-audition.ts` | plays a patch on audition slot 9 with synthetic gestures or a take; peak/RMS per phase, server CPU, errors, silence on unload | `npm run patch:audition -- <Name> [--quick\|--long\|--take <label>] [--params k=v,…] [--rest-max <dBFS>]` |
+| `take-record.ts` | records one wrist's IMU stream (UDP 8001; see below) to `takes/<label>.take.jsonl` | `npm run take:record -- <label> --wrist ZL [--seconds 30]` |
 | `samples-check.ts` | matches downloaded files to `SHOPPING.md` slots, converts to 48 kHz WAV, writes `manifest.json` and `SOURCES.md` | `npm run samples:check -- COS_<Name>` |
 | `corpus-mine.ts` | mines every AirKit branch's personalities from git objects into `patching/corpus/` | `npm run corpus:mine` |
 

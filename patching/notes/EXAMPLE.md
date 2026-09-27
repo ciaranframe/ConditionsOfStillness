@@ -102,7 +102,7 @@ holds 6 files), so signatures were read from the class source in
 6. `LeakDC.ar(in, coef = 0.995, …)` (Filter.sc:147–149) and `OnePole.ar(in, coef = 0.5, …)`
    (Filter.sc:15–17) — DC guard and a cheap tilt.
 7. CPU method: one long-lived synth — one noise source, three band-passes, a control-rate
-   breath envelope — is a handful of UGens; the audition prints `serverCpu`; eight live copies
+   breath envelope — is a handful of UGens; the audition prints `server cpu (max)`; eight live copies
    must stay a small fraction of scsynth (`research.md` §1E). No per-event synths, no buffers.
 8. The breath cycle belongs **in the SynthDef** (an `LFTri`/`EnvGen`-shaped control-rate
    oscillator whose rate and depth are `.set` from the tick), not in a tick-side Routine — no
@@ -116,21 +116,21 @@ envelope → `LeakDC` → output ceiling; everything `.set` from `~idleNext`.
 
 Queried `patching/corpus/index.json` (non-duplicate personalities whose name matches
 breath/wind/whisper/air/sigh/blow: 20; with `PinkNoise` and `BPF`/`Resonz`: 26; with
-`Formlet`/`Formant`: 0) and read `patching/corpus/digest.md` §1, §2, §4, §12, §13. No corpus file
+`Formlet`/`Formant`: 0) and read `patching/corpus/digest.md` logics 1, 2, 4, 5, 12, 13. No corpus file
 is a breath; the nearest are wind beds and one stillness-first chord.
 
 1. `AirConcert/personalities/WINDY.sc:122` — `base = PinkNoise.ar * LFNoise2.kr(breezeSpeed).range(0.7, 1.0);`
    then `RLPF` with a drifting cutoff (:125–129): the noise-bed shape to borrow.
 2. `AirConcert/personalities/WINDY.sc:216` — `masterAmp.lagud(0.6, 6) * 4`: slow-fall
-   smoothing in the SynthDef (digest §4) — a breath that outlasts a movement.
+   smoothing in the SynthDef (digest logic 4) — a breath that outlasts a movement.
 3. `AirConcert/personalities/WINDY.sc:394` — `m.accelMassFiltered.lincurve(0, 1.0, -80, -15, -1).dbamp`:
-   motion → dB law (digest §1) — here **inverted**: motion lowers the breath.
+   motion → dB law (digest logic 1) — here **inverted**: motion lowers the breath.
 4. `AirConcert/personalities/cotf_whisperer1.sc:142` — `{ true } { \high };`: the inverted
-   tier, where stillness is the fullest state (digest §12) — the design's core idea.
+   tier, where stillness is the fullest state (digest logic 12) — the design's core idea.
 5. `AirConcert/personalities/cotf_whisperer1.sc:148` — `lastMotion = now;`: the stillness clock
-   for a reveal; its ghost-echo fire was never finished (digest §12, `patterns.md` §7).
+   for a reveal; its ghost-echo fire was never finished (digest logic 12, `patterns.md` §7).
 6. `AirConcert/personalities/RainKeys.sc:279` — `((m.accelMassFiltered - 0.25).max(0) * 0.7).clip(0, 1)`:
-   a gravity rest floor (digest §2); superseded here by the template's adaptive `grav`/`energy`
+   a gravity rest floor (digest logic 2); superseded here by the template's adaptive `grav`/`energy`
    (`airkit/personalities/COS_Template.sc:35`), which is 0 at rest in any orientation.
 7. `AirConcert/personalities/WindVoice.sc:221` — `if (in < thresh) { 0 } {`: a dead zone —
    the shape for "still enough to count as rest".
@@ -139,8 +139,10 @@ is a breath; the nearest are wind beds and one stillness-first chord.
    breath) the design rejected in favour of a living cycle.
 
 Borrowed: the pink-noise bed with drifting filter (1), slow-fall amp smoothing (2), the inverted
-motion law (3–4), the stillness clock (5). Not borrowed: `ctx.loudness`, beat hooks, literal
-SynthDef names (`\forestBreeze` is unprefixed — `pitfalls.md` §28).
+motion law (3–4), the stillness clock (5); the fast fall when the hand plays follows digest
+logic 13 (put-down and damping), and the tilt colour digest logic 5. Not borrowed: `ctx.loudness`,
+beat hooks (the corpus predates this engine — `pitfalls.md` §28), literal SynthDef names
+(`\forestBreeze` is unprefixed — `pitfalls.md` §7, lint `synthdef.prefix`).
 
 ## 4. Design (provisional — tracks A–D not run)
 
@@ -169,7 +171,7 @@ SynthDef names (`\forestBreeze` is unprefixed — `pitfalls.md` §28).
 | left hand resting still over the keys | template `energy` | breath depth (amp) | 0 … 0.3 | full … −30 dB | inverted, slow fall | stillness is the fullest state (F-4) |
 | hand starting to move / preparing to play | `energy` | breath rate | 0 … 0.3 | 1× … ~2× | lincurve, 1 s lag | the breath quickens before playing *(unverified)* |
 | playing (key attacks, rolled chords) | `energy` > 0.3 | fade out | — | to silence over ~2 s | lagud | the breath is let go when the hand plays |
-| forearm tilt over the keyboard | `gyroYFiltered` | band-centre offset | −1 … 1 | ±3 semitones of colour | 2 s lag | slow register colour (digest §5) |
+| forearm tilt over the keyboard | `gyroYFiltered` | band-centre offset | −1 … 1 | ±3 semitones of colour | 2 s lag | slow register colour (digest logic 5) |
 
 - **At rest / stillness** — a quiet, living breath cycle; after ~10 s still, one deeper, darker
   breath (reveal), re-armed by motion.
@@ -178,7 +180,9 @@ SynthDef names (`\forestBreeze` is unprefixed — `pitfalls.md` §28).
   one-shot flag; release ≤ 0.15 s on `gate` 0 (`patterns.md` §12).
 - **Level and CPU** — halo level: breath peaks well below the plan's −12…−6 dBFS (it is loudest
   at rest, where the piano may be quiet — calibrate against a take); an output ceiling
-  by gain and `.clip`; one synth, no buffers.
+  by gain and `.clip`; one synth, no buffers. Because rest is the loudest state, the audition
+  needs `--rest-max <dBFS>` (the default −34 dBFS rest ceiling would fail it); the value used is
+  recorded here once calibrated.
 - **Samples** — none.
 
 ## 5. Params
@@ -202,8 +206,8 @@ Checks: lint —; compile —; audition —; samples none.
 ## 7. Sources
 
 - `patching/profile.md`; `patching/context/README.md`.
-- `.claude/skills/airkit-patch/references/engine.md` §3–§7, `patterns.md` §1, §7, §10–12, `pitfalls.md` §9, §19, §20, §28, §32, §33, `research.md`.
-- `patching/corpus/digest.md` §1, §2, §4, §5, §12; `patching/corpus/index.json` (queries above).
+- `.claude/skills/airkit-patch/references/engine.md` §3–§7, `patterns.md` §1, §7, §10–12, `pitfalls.md` §7, §9, §19, §20, §28, §32, §33, `research.md`.
+- `patching/corpus/digest.md` logics 1, 2, 4, 5, 12, 13; `patching/corpus/index.json` (queries above).
 - Corpus files and lines as cited in §3F (raw files in the main checkout).
 - `airkit/personalities/COS_Template.sc:35` (the gravity-free `energy`).
 - `/Applications/SuperCollider.app/Contents/Resources/SCClassLibrary/Common/Audio/{Noise.sc,Filter.sc}` — UGen signatures.

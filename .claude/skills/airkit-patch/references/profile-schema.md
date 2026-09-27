@@ -49,7 +49,7 @@ the relevant parts into subagent briefs.
 | **Takes** | where recorded wrist streams live, their index | calibration; audition `--take` |
 | **Samples** | the folder layout, the check command, the loading rule | `samples.md` |
 | **Hand-off format** | how to describe gestures (performer terms, not IMU terms), what to say about rest vs shaken, which params to try | the hand-off |
-| **Where context lives** | the context folder (`patching/context/`) and that it is read in full first | step 1 of the skill |
+| **Where context lives** | the context folder (`patching/context/`) and that it is read in full first | step 0 of the skill |
 | **Research note location** | `patching/notes/<prefix><Name>.md` and the template path | the note step |
 
 ## 3. Rules for a profile
