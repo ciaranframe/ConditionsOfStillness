@@ -66,3 +66,19 @@ test('rate is packets per second over the last second', async () => {
   assert.ok(h.rateHz >= 15 && h.rateHz <= 25, `rate ${h.rateHz}`);
   close();
 });
+
+test('rate reads 0 once the stick goes silent; an aux-only stick is forgotten after 60 s', async () => {
+  const now = { t: 0 };
+  const { ing, send, close } = await ingest(now);
+  for (let i = 0; i < 10; i++) { now.t += 10; send('/3/IMUFusedData', [0, 0, -9.8, 0, 0, 0, 1], 'fffffff'); }
+  send('/8/Battery', [3.9, 50], 'ff');          // never sends IMU
+  await sleep(60);
+  assert.ok(ing.heard().find((h) => h.id === '3')!.rateHz >= 5);
+  assert.ok(ing.heard().some((h) => h.id === '8'));
+  now.t += 1500;
+  assert.equal(ing.heard().find((h) => h.id === '3')!.rateHz, 0);
+  now.t += 60_000;
+  assert.ok(!ing.heard().some((h) => h.id === '8'), 'aux-only stick forgotten');
+  assert.ok(!ing.heard().some((h) => h.id === '3'), 'silent stick forgotten');
+  close();
+});

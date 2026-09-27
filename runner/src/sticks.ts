@@ -21,8 +21,10 @@ export interface StickIngestOptions {
   clock?: () => number; log?: (msg: string) => void;
 }
 
-interface Entry { id: string; ip: string; lastImuAt: number; stamps: number[]; batteryPct: number | null; volts: number | null; packets: number }
+interface Entry { id: string; ip: string; lastImuAt: number; lastSeenAt: number; stamps: number[]; batteryPct: number | null; volts: number | null; packets: number }
 const num = (v: unknown): number => (typeof v === 'number' ? v : Number(v));
+/** Drop stamps older than the 1 s rate window; used on both the write and read paths. */
+const trimStamps = (stamps: number[], now: number): void => { while (stamps.length && stamps[0]! < now - 1000) stamps.shift(); };
 
 export class StickIngest {
   private opts: StickIngestOptions;
@@ -59,13 +61,14 @@ export class StickIngest {
       const [, id, kind] = hit as unknown as [string, string, 'IMUFusedData' | 'Battery' | 'DigiIn'];
       const key = `${id}@${ip}`;
       let e = this.entries.get(key);
-      if (!e) { e = { id, ip, lastImuAt: -Infinity, stamps: [], batteryPct: null, volts: null, packets: 0 }; this.entries.set(key, e); this.log(`[sticks] heard stick ${id} from ${ip}`); }
+      if (!e) { e = { id, ip, lastImuAt: -Infinity, lastSeenAt: now, stamps: [], batteryPct: null, volts: null, packets: 0 }; this.entries.set(key, e); this.log(`[sticks] heard stick ${id} from ${ip}`); }
+      e.lastSeenAt = now;
       const wrist = wristOfStickId(this.opts.cast(), id);
       const args = m.args.map(num);
       if (kind === 'IMUFusedData') {
         if (args.length !== 7 || args.some((v) => !Number.isFinite(v))) continue;
         e.lastImuAt = now; e.packets++; e.stamps.push(now);
-        while (e.stamps.length && e.stamps[0]! < now - 1000) e.stamps.shift();
+        trimStamps(e.stamps, now);
         if (wrist) this.opts.onImu(wrist, args);
       } else if (kind === 'Battery') {
         if (args.length >= 2 && Number.isFinite(args[1])) { e.volts = args[0]!; e.batteryPct = Math.round(args[1]! <= 1 ? args[1]! * 100 : args[1]!); }
@@ -75,11 +78,12 @@ export class StickIngest {
   }
   private live(): Entry[] {
     const now = this.clock();
-    for (const [k, e] of this.entries) if (now - e.lastImuAt > HEARD_FORGET_MS && e.lastImuAt !== -Infinity) this.entries.delete(k);
+    for (const [k, e] of this.entries) if (now - e.lastSeenAt > HEARD_FORGET_MS) this.entries.delete(k);
     return [...this.entries.values()];
   }
   heard(): HeardStick[] {
     const now = this.clock(), cast = this.opts.cast(), all = this.live();
+    for (const e of all) trimStamps(e.stamps, now);
     const byId = new Map<string, Entry[]>();
     for (const e of all) byId.set(e.id, [...(byId.get(e.id) ?? []), e]);
     return all.map((e) => ({
