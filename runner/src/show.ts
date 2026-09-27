@@ -44,6 +44,7 @@ export class Show extends EventEmitter {
   auditionState: { wrist: Wrist; patch: string } | null = null;
 
   private cueSeq = 0;
+  private onOnline = () => { void this.pushAll(); };
   private airkit: AirkitLink;
   private cast: () => Cast;
   private store: StateStore;
@@ -193,9 +194,13 @@ export class Show extends EventEmitter {
     for (const w of WRISTS) {
       const rt = this.wrists[w]; if (rt.fade || rt.loading) continue;
       const desired = n.sounds[w];
-      if (sameSound(rt.live, desired)) continue;                               // a live change needs no preload
-      if (rt.standby === null && desired.patch === 'silence') continue;
-      if (rt.standby && sameSound(rt.standby, desired)) continue;
+      // a live change needs no preload; silence needs a free slot. Anything else left on standby is stale.
+      const want = sameSound(rt.live, desired) || desired.patch === 'silence' ? null : desired;
+      if (want === null) {
+        if (rt.standby !== null) { this.log(`${this.labelOf(w)}: unload stale ${rt.standby.patch} from slot ${slotsOf(w)[other(rt.liveSlot)]}`); this.unloadOutgoing(w); }
+        continue;
+      }
+      if (rt.standby && sameSound(rt.standby, want)) continue;
       const slot = slotsOf(w)[other(rt.liveSlot)];
       this.airkit.params(slot, desired.params); this.airkit.partner(slot, this.partnerSlotFor(desired, n));
       this.airkit.load(slot, desired.patch);
@@ -207,18 +212,21 @@ export class Show extends EventEmitter {
   // Task 7 replaces this with the restore-or-standby version; for now boot = pushAll when online.
   async boot(): Promise<void> {
     for (const w of WRISTS) this.wrists[w] = { ...freshRuntime(), live: this.current.sounds[w] };
-    this.airkit.on('online', () => { void this.pushAll(); });
+    this.airkit.on('online', this.onOnline);
     if (this.airkit.online) await this.pushAll();
     this.changed();
   }
 
   // Spec §5.1 re-push order: master → per-wrist level and xfade → params and partner for every slot → loads.
+  // Supersedes any cue still waiting for ready and lands the model on the current scene with no fade in flight.
   async pushAll(): Promise<void> {
     this.log('re-pushing everything to the engine');
+    this.cueSeq++;
     for (const w of WRISTS) {
       const rt = this.wrists[w];
       if (rt.unloadTimer) clearTimeout(rt.unloadTimer);
       rt.unloadTimer = null; rt.fade = null; rt.loading = false; rt.standby = null; rt.standbyReady = true;
+      rt.live = this.current.sounds[w];          // liveSlot kept
     }
     if (!(await this.airkit.ensureDevices())) this.log('some engine devices are missing; loads will be refused until they appear', 'warn');
     const scene = this.current;
@@ -239,6 +247,7 @@ export class Show extends EventEmitter {
   }
 
   dispose(): void {
+    this.airkit.off('online', this.onOnline);
     this.cueSeq++;                      // a cue still waiting for ready returns 'superseded' and schedules nothing
     for (const w of WRISTS) { const rt = this.wrists[w]; if (rt.unloadTimer) clearTimeout(rt.unloadTimer); rt.unloadTimer = null; }
   }

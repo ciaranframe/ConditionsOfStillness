@@ -1,9 +1,9 @@
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fakeAirkit, type FakeAirkit } from './fake-airkit.ts';
+import { fakeAirkit } from './fake-airkit.ts';
 import { AirkitLink } from '../src/airkit.ts';
 import { Show } from '../src/show.ts';
 import { parseScenes, SILENCE } from '../src/scenes.ts';
@@ -23,12 +23,15 @@ scenes:
 `;
 const cast = parseCast('sticks: { ZL: { id: 1, label: A3 }, ZR: { id: 2, label: A4 }, CL: { id: 3, label: B1 }, CR: { id: 4, label: B2 } }\n').cast;
 
-export async function rig(opts: { readyDelayMs?: number; readyTimeoutMs?: number; scenesText?: string; state?: object | null } = {}) {
+export async function rig(t: TestContext, opts: { readyDelayMs?: number; readyTimeoutMs?: number; scenesText?: string; state?: object | null } = {}) {
   const fake = await fakeAirkit({ roster: ROSTER, readyDelayMs: opts.readyDelayMs ?? 10 });
   const airkit = new AirkitLink({ host: '127.0.0.1', port: fake.port, sourcePort: 0, pollMs: 50, log: () => {} });
   const store = new StateStore(join(mkdtempSync(join(tmpdir(), 'cos-show-')), 'current.json'));
   if (opts.state) store.save(opts.state as never);
   const lines: string[] = [];
+  let closed = false;
+  const close = () => { if (closed) return; closed = true; show.dispose(); airkit.close(); fake.close(); };
+  t.after(close);   // a failed assertion must not leave sockets open and hang the run
   const show = new Show({ scenes: parseScenes(opts.scenesText ?? SCENES, ROSTER).file!.scenes, airkit, cast: () => cast, store, log: (m, l) => lines.push(`${l ?? 'info'} ${m}`), readyTimeoutMs: opts.readyTimeoutMs ?? 1000, unloadGraceMs: 10 });
   await airkit.start();
   await show.boot();
@@ -37,11 +40,11 @@ export async function rig(opts: { readyDelayMs?: number; readyTimeoutMs?: number
   const port = (slot: number) => airkit.portOf(slot);
   const sends = (addr: string, from = 0) => fake.log.slice(from).filter((m) => m.address === addr).map((m) => m.args);
   const loads = (from = 0) => sends('/airkit/loadPersonality', from).map(([p, i]) => [Number(p) - port(1) + 1, ROSTER[Number(i)]]);   // [slot, patch]
-  return { fake, airkit, show, store, lines, port, sends, loads, mark: () => fake.log.length, close: () => { show.dispose(); airkit.close(); fake.close(); } };
+  return { fake, airkit, show, store, lines, port, sends, loads, mark: () => fake.log.length, close };
 }
 
-test('boots to STANDBY with scene A preloaded on the standby slots', async () => {
-  const r = await rig();
+test('boots to STANDBY with scene A preloaded on the standby slots', async (t) => {
+  const r = await rig(t);
   assert.equal(r.show.sceneIndex, -1);
   assert.equal(r.show.current.id, 'STANDBY');
   // every live slot (1,3,5,7) silence; A's sounds preloaded on 2,4,8; CL keeps silence (A does not mention CL)
@@ -55,8 +58,8 @@ test('boots to STANDBY with scene A preloaded on the standby slots', async () =>
   r.close();
 });
 
-test('NEXT to A: waits for ready, fires level and xfade together, unloads the outgoing slot, preloads B', async () => {
-  const r = await rig();
+test('NEXT to A: waits for ready, fires level and xfade together, unloads the outgoing slot, preloads B', async (t) => {
+  const r = await rig(t);
   const m = r.mark();
   assert.equal(await r.show.next('pedal'), 'done');
   await sleep(20);
@@ -79,8 +82,8 @@ test('NEXT to A: waits for ready, fires level and xfade together, unloads the ou
   r.close();
 });
 
-test('A → B: same patch with new params is a live change (no load); CL crossfades using its preload', async () => {
-  const r = await rig();
+test('A → B: same patch with new params is a live change (no load); CL crossfades using its preload', async (t) => {
+  const r = await rig(t);
   await r.show.next('pedal'); await sleep(150);
   const m = r.mark();
   await r.show.next('pedal'); await sleep(150);
@@ -93,11 +96,10 @@ test('A → B: same patch with new params is a live change (no load); CL crossfa
   r.close();
 });
 
-test('two-hand sound: left wrist loads with the partner slot, right wrist goes to silence', async () => {
-  const r = await rig();
+test('two-hand sound: left wrist loads with the partner slot, right wrist goes to silence', async (t) => {
+  const r = await rig(t);
   await r.show.next('pedal'); await sleep(150);
   await r.show.next('pedal'); await sleep(150);
-  const m = r.mark();
   await r.show.jump(2, 'admin'); await sleep(150);
   // after B: CL live on slot 6 (COS_B), CR live on slot 8 (COS_Template). C: CL ← COS_X2H on slot 5, partner = CR's target slot 7; CR ← silence on slot 7.
   assert.ok(r.loads().some(([s, p]) => s === 5 && p === 'COS_X2H'));
@@ -108,10 +110,9 @@ test('two-hand sound: left wrist loads with the partner slot, right wrist goes t
   r.close();
 });
 
-test('a press mid-fade finishes the running fade in 0.1 s, unloads, then starts the new transition', async () => {
-  const r = await rig();
+test('a press mid-fade finishes the running fade in 0.1 s, unloads, then starts the new transition', async (t) => {
+  const r = await rig(t);
   await r.show.jump(2, 'admin'); await sleep(150);
-  const m = r.mark();
   const p = r.show.next('pedal');            // to D: fade 0.4, ZR ← COS_B
   await sleep(100);
   assert.ok(r.show.wrists.ZR.fade, 'ZR fading');
@@ -130,8 +131,8 @@ test('a press mid-fade finishes the running fade in 0.1 s, unloads, then starts 
   r.close();
 });
 
-test('ends of the list: next at the last scene and back at STANDBY are noops; back at A returns to STANDBY', async () => {
-  const r = await rig();
+test('ends of the list: next at the last scene and back at STANDBY are noops; back at A returns to STANDBY', async (t) => {
+  const r = await rig(t);
   assert.equal(await r.show.back('pedal'), 'noop');
   await r.show.jump(3, 'admin');
   assert.equal(await r.show.next('pedal'), 'noop');
@@ -144,8 +145,8 @@ test('ends of the list: next at the last scene and back at STANDBY are noops; ba
   r.close();
 });
 
-test('a newer cue supersedes one still waiting for ready (Review Focus 4)', async () => {
-  const r = await rig({ readyDelayMs: 300, readyTimeoutMs: 2000 });
+test('a newer cue supersedes one still waiting for ready (Review Focus 4)', async (t) => {
+  const r = await rig(t, { readyDelayMs: 300, readyTimeoutMs: 2000 });
   const m = r.mark();
   const first = r.show.next('pedal');
   await sleep(20);
@@ -159,12 +160,43 @@ test('a newer cue supersedes one still waiting for ready (Review Focus 4)', asyn
   r.close();
 });
 
-test('not ready within the timeout: fades anyway with a warning (ruling 4)', async () => {
-  const r = await rig({ readyDelayMs: 600, readyTimeoutMs: 120 });
+test('not ready within the timeout: fades anyway with a warning (ruling 4)', async (t) => {
+  const r = await rig(t, { readyDelayMs: 600, readyTimeoutMs: 120 });
   const t0 = Date.now();
   assert.equal(await r.show.next('pedal'), 'done');
   assert.ok(Date.now() - t0 < 500);
   assert.ok(r.lines.some((l) => /^warn .*not ready after 120 ms/.test(l)), r.lines.join('\n'));
   assert.ok(r.sends('/airkit/cos/xfade').some(([w]) => w === 'ZL'));
+  r.close();
+});
+
+test('engine restart during a ready wait: the waiting cue is superseded and the target scene is pushed', async (t) => {
+  const r = await rig(t, { readyDelayMs: 400, readyTimeoutMs: 1500 });
+  const p = r.show.next('pedal');            // to A, waiting for ready
+  await sleep(50);
+  await r.fake.stop();
+  await sleep(200);                          // offline (3 polls of 50 ms)
+  await r.fake.start();
+  for (let i = 0; i < 50 && !r.airkit.online; i++) await sleep(20);
+  assert.equal(await p, 'superseded');
+  await sleep(600);
+  assert.equal(r.show.sceneIndex, 0);
+  for (const w of ['ZL', 'ZR', 'CR'] as const) assert.equal(r.show.wrists[w].live.patch, w === 'CR' ? 'COS_Template' : 'COS_A');
+  assert.equal(r.fake.devices.get(r.port(1 + r.show.wrists.ZL.liveSlot))?.name, 'COS_A', 'A live on ZL live slot after the re-push');
+  assert.ok(r.loads().some(([s, p2]) => s === 6 && p2 === 'COS_B'), 'B preloaded after the re-push');
+  assert.equal(r.show.wrists.ZL.fade, null);
+  r.close();
+});
+
+test('a stale standby preload is unloaded when the next scene no longer wants it', async (t) => {
+  const r = await rig(t);
+  await r.show.jump(0, 'admin'); await sleep(150);
+  assert.equal(r.fake.devices.get(r.port(6))?.name, 'COS_B', 'B preloaded on CL slot 6 while in A');
+  assert.equal(await r.show.back('pedal'), 'done');
+  await sleep(2200);                         // STANDBY's fade is 2 s; the stale unload runs when it ends
+  assert.equal(r.show.sceneIndex, -1);
+  // In STANDBY the next scene is A, whose CL is silence: the B preload on slot 6 is stale.
+  assert.equal(r.fake.devices.get(r.port(6))?.name, 'silence');
+  assert.equal(r.show.wrists.CL.standby, null);
   r.close();
 });
