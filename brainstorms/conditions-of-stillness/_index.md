@@ -1,6 +1,6 @@
 # Conditions of Stillness — AirStick system — index
 
-**Status:** architecture designed 2026-09-26; foundation and engine profile built and merged 2026-09-26; runner next; patches not started.
+**Status:** architecture designed 2026-09-26; foundation, engine profile (2026-09-26) and runner + pages (2026-09-27) built and merged; patch skill and tooling next; patches not started.
 **Trajectory:** foundation → engine profile → runner + pages → patch skill + tooling → patches (with Ciaran's per-scene context) → rehearsal 1.
 
 ## Versions
@@ -8,6 +8,7 @@
 |---|---|---|
 | [v1](conditions-of-stillness-v1.md) | 2026-09-26 | First session. Context survey of AirKit, COTF Patch Lab and Glimmer; five rounds of questions; approaches chosen on three axes; sectioned design approved; umbrella spec written. |
 | [v2](conditions-of-stillness-v2.md) | 2026-09-26 | Execution: foundation and engine profile built, reviewed, merged; page design locked from a mockup; repos on GitHub. |
+| [v3](conditions-of-stillness-v3.md) | 2026-09-27 | Execution: runner and pages built, reviewed, merged autonomously; rulings recorded; sub-project 4 next. |
 
 ## Major decisions (all versions)
 - 2026-09-26 — Free time, no conductor; scenes file is the only structure; no score link.
@@ -16,6 +17,7 @@
 - 2026-09-26 — Generic `airkit-patch` skill + piece profile; six research tracks; corpus mining; shopping-list samples.
 - 2026-09-26 — Piece repo here + AirKit worktree on `AirConditions`; private mirror repo, not a fork.
 - 2026-09-26 — Tooling and skill before any patch.
+- 2026-09-27 — Runner: STANDBY at boot, live param change without reload, sticks by OSC id assigned from Admin, 2 s ready wait; only RESUME clears a panic.
 - 2026-09-26 — Page design locked after mockup feedback: cockpit style, colour = status only, "SCENE D" dominant, real stick names, status strip. Mockup: https://claude.ai/artifact/DdTVyHA4x2BFFuGCGrxYT1
 
 ## Related
