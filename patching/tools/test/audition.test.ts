@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSocket } from 'node:dgram';
-import { runAudition } from '../src/audition.ts';
+import { runAudition, verdictFor } from '../src/audition.ts';
 import { longPhases, quickPhases } from '../src/phases.ts';
 import { fakeAirkit, type FakeAirkit } from '../../../runner/test/fake-airkit.ts';
 
@@ -96,11 +96,17 @@ test('auditions on the private slot-9 device only, reads levels per phase, resto
     assert.ok(result.phases.every((p) => p.verdict === 'ok'));
     assert.ok(result.silenced);
 
-    // getStatus polled at least every 250 ms while the phases played (5 Hz + jitter).
+    // getStatus polled at 5 Hz while the phases played: no gap over 400 ms (200 ms + scheduler
+    // jitter on a loaded machine; the runner's own poll is 2 s).
     const polls = fake.sent('/airkit/cos/getStatus').map((m) => m.t).filter((t) => t >= runStart && t <= runEnd);
     assert.ok(polls.length >= 10, `only ${polls.length} status polls during ~4 s of phases`);
-    for (let i = 1; i < polls.length; i++) assert.ok(polls[i]! - polls[i - 1]! <= 250, `gap ${polls[i]! - polls[i - 1]!} ms`);
-    assert.ok(polls[0]! - runStart <= 250 && runEnd - polls[polls.length - 1]! <= 250);
+    for (let i = 1; i < polls.length; i++) assert.ok(polls[i]! - polls[i - 1]! <= 400, `gap ${polls[i]! - polls[i - 1]!} ms`);
+    assert.ok(polls[0]! - runStart <= 400 && runEnd - polls[polls.length - 1]! <= 400);
+
+    // CPU: the fake reports serverCpu 12.3 in every status reply; max-held during the phases.
+    assert.ok(result.serverCpuMax !== undefined && Math.abs(result.serverCpuMax - 12.3) < 1e-6, `serverCpuMax ${result.serverCpuMax}`);
+    assert.match(result.table, /server cpu \(max\) 12\.3 %/);
+    assert.match(result.table, /^rest ceiling -34\.0 dBFS/);
 
     // Table text.
     assert.match(result.table, /phase\s*\|\s*seconds\s*\|\s*peak dBFS\s*\|\s*rms dBFS\s*\|\s*verdict/);
@@ -213,4 +219,78 @@ test('an engine that never answers cannot run', async () => {
   });
   assert.equal(result.outcome, 'couldNotRun');
   assert.match(result.reason ?? '', /roster/);
+});
+
+test('verdictFor: a 0.3 level at rest fails the default ceiling and passes with restMaxPeak 0.5', () => {
+  const rest = quickPhases()[0]!;
+  assert.equal(rest.name, 'rest');
+  const levels = { peak: 0.3, samples: 20, peakSettled: 0.3, settledSamples: 15 };
+  const byDefault = verdictFor(rest, levels);
+  assert.equal(byDefault.verdict, 'fail');
+  assert.match(byDefault.why ?? '', /settled peak > -34\.0 dBFS/);
+  assert.deepEqual(verdictFor(rest, levels, { restMaxPeak: 0.5 }), { verdict: 'ok' });
+  // the clip ceiling still holds whatever the rest ceiling
+  assert.equal(verdictFor(rest, { ...levels, peak: 0.99 }, { restMaxPeak: 0.5 }).verdict, 'fail');
+});
+
+test('restMaxPeak: a patch that sounds at rest passes with a raised ceiling, fails without; silence after unload stays strict', async () => {
+  const phases = quickPhases().map((p) => ({ ...p, seconds: 0.8 }));
+  for (const restMaxPeak of [0.5, undefined]) {
+    const fake = await fakeAirkit();
+    const srcPort = await freePort();
+    const stopWatch = silenceOnUnload(fake, () => srcPort + 8);
+    try {
+      fake.levels[8] = 0.3;   // loud at rest and while shaken; silence on the unload
+      const result = await runAudition({
+        host: '127.0.0.1', port: fake.port, srcPort, patch: 'COS_Template', phases, log: () => {},
+        ...(restMaxPeak === undefined ? {} : { restMaxPeak }),
+      });
+      assert.equal(result.restMaxPeak, restMaxPeak ?? 0.02);
+      assert.ok(result.silenced);
+      if (restMaxPeak === undefined) {
+        assert.equal(result.outcome, 'fail');
+        assert.equal(result.phases.find((p) => p.name === 'rest')!.verdict, 'fail');
+      } else {
+        assert.equal(result.outcome, 'pass', JSON.stringify(result.phases));
+        assert.match(result.table, /^rest ceiling -6\.0 dBFS/);
+      }
+    } finally {
+      stopWatch();
+      fake.close();
+    }
+  }
+});
+
+test('next to a live runner: its nine seats (9001–9009) are untouched, the two-index-9 note is given, ready is still reached', async () => {
+  const fake = await fakeAirkit({ roster: ['silence', 'COS_Template', 'silence'] });
+  // What a running runner leaves in the engine: one device per slot on 9001–9009 (source port
+  // 9001), index = slot, COS_Template on slot 2 and silence elsewhere.
+  const runnerSeats = new Map<number, string>();
+  for (let slot = 1; slot <= 9; slot++) {
+    const port = 9000 + slot;
+    const name = slot === 2 ? 'COS_Template' : 'silence';
+    runnerSeats.set(port, name);
+    fake.devices.set(port, { name, index: slot, ready: true, loadedAt: 0 });
+  }
+  const srcPort = await freePort();
+  const devicePort = srcPort + 8;
+  const stopWatch = silenceOnUnload(fake, () => devicePort);
+  try {
+    const result = await runAudition({
+      host: '127.0.0.1', port: fake.port, srcPort, patch: 'COS_Template',
+      phases: quickPhases().map((p) => ({ ...p, seconds: 0.6 })), log: () => {},
+      timeouts: { readyMs: 800 },
+      onPhase: (phase) => { fake.levels[8] = phase.name === 'shake' ? 0.3 : 0; },
+    });
+    assert.ok(result.ready, JSON.stringify(result, null, 2));
+    assert.ok(result.notes.some((n) => /second index-9 device.*9009/.test(n)), result.notes.join('\n'));
+    for (const [port, name] of runnerSeats) assert.equal(fake.devices.get(port)?.name, name, `seat ${port} changed`);
+    const onRunner = fake.sent('/airkit/loadPersonality').filter((m) => Number(m.args[0]) >= 9001 && Number(m.args[0]) <= 9009);
+    assert.equal(onRunner.length, 0, 'sent a load to a runner port');
+    assert.ok(fake.sent('/airkit/loadPersonality').every((m) => Number(m.args[0]) === devicePort));
+    assert.equal(fake.devices.get(devicePort)?.name, 'silence');
+  } finally {
+    stopWatch();
+    fake.close();
+  }
 });

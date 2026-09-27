@@ -225,6 +225,13 @@ test('expected(): per-name minPeak/maxPeak', () => {
   }
 });
 
+test('expected(): restMaxPeak raises only the rest/still/settle ceiling', () => {
+  const byName = new Map(syntheticPhases().map((p) => [p.name, p] as const));
+  for (const n of ['rest', 'still', 'settle'] as const) assert.deepEqual(expected(byName.get(n)!, { restMaxPeak: 0.5 }), { maxPeak: 0.5 });
+  assert.deepEqual(expected(byName.get('shake')!, { restMaxPeak: 0.5 }), { minPeak: 0.01, maxPeak: 0.98 });
+  assert.deepEqual(expected(byName.get('tilt')!, { restMaxPeak: 0.5 }), { maxPeak: 0.98 });
+});
+
 // --- takePhases ------------------------------------------------------------------------------
 
 function takeHeader(label: string): string {

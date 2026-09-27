@@ -148,15 +148,25 @@ export function longPhases(): Phase[] {
   return [...phases.slice(0, shakeIndex), inserted, ...phases.slice(shakeIndex)];
 }
 
+/** Default ceiling for the quiet phases (rest/still/settle): 0.02 linear, about -34 dBFS. */
+export const DEFAULT_REST_MAX_PEAK = 0.02;
+
+export interface ExpectedOptions {
+  /** Ceiling (linear peak) for rest/still/settle. Default DEFAULT_REST_MAX_PEAK; raise it for a
+   * patch whose note designs an audible rest (the audition's `--rest-max <dBFS>`). */
+  restMaxPeak?: number;
+}
+
 /** Linear peak values (0-1, as `/airkit/cos/levels` reports) expected while a phase plays.
- * rest/still/settle should stay near silent; shake/strike should clearly register; every phase
+ * rest/still/settle stay under the rest ceiling (near silent by default; `restMaxPeak` raises
+ * it for a patch designed to sound at rest); shake/strike should clearly register; every phase
  * must stay under the clipping ceiling. */
-export function expected(phase: Phase): { minPeak?: number; maxPeak?: number } {
+export function expected(phase: Phase, opts: ExpectedOptions = {}): { minPeak?: number; maxPeak?: number } {
   switch (phase.name) {
     case 'rest':
     case 'still':
     case 'settle':
-      return { maxPeak: 0.02 };
+      return { maxPeak: opts.restMaxPeak ?? DEFAULT_REST_MAX_PEAK };
     case 'shake':
     case 'strike':
       return { minPeak: 0.01, maxPeak: 0.98 };

@@ -11,9 +11,12 @@
 // Levels per phase keep two maxima. `peakAll` covers every levels message received while the
 // phase plays and is checked against the 0.98 clip ceiling and, for shake/strike, the minPeak
 // onset floor. `peakSettled` skips the phase's first 0.5 s (graceMs) and is used only for the
-// 0.02 ceiling of the quiet phases (rest/still/settle): quiet phases ignore their first 0.5 s
-// for release tails of whatever played before them. The log scan covers the audition only (from
-// the byte offset at which runAudition started), not the engine's boot.
+// rest ceiling of the quiet phases (rest/still/settle; 0.02 ≈ −34 dBFS unless `restMaxPeak`
+// raises it for a patch designed to sound at rest): quiet phases ignore their first 0.5 s for
+// release tails of whatever played before them. The after-unload silence check is always strict
+// (< 0.01). `serverCpu` from the 5 Hz status polls is max-held while the phases play. The log
+// scan covers the audition only (from the byte offset at which runAudition started), not the
+// engine's boot.
 //
 // EngineLink's bind/ask/reply-matching pattern is copied from runner/src/airkit.ts (AirkitLink,
 // itself after the Glimmer show engine's sticks/airkit.ts, Ciaran Frame 2026); bootEngine /
@@ -25,7 +28,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { encodeMessage, flattenPacket, type OscArg, type OscMessage } from '../../../scripts/lib/osc.ts';
-import { expected, type Phase, type Pose } from './phases.ts';
+import { DEFAULT_REST_MAX_PEAK, expected, type Phase, type Pose } from './phases.ts';
 import { SCLANG, airkitRoot, repoRoot } from './sc.ts';
 
 export const AUDITION_SLOT = 9;
@@ -166,6 +169,8 @@ const DEFAULT_TIMEOUTS: AuditionTimeouts = { askMs: 1000, seatsMs: 2000, readyMs
 export interface AuditionOptions {
   host: string; port: number; srcPort: number; patch: string; phases: Phase[];
   params?: Record<string, string | number>;
+  /** Ceiling (linear peak) for rest/still/settle; default 0.02 (≈ −34 dBFS). */
+  restMaxPeak?: number;
   log?: (m: string) => void;
   /** Engine log to scan for errors written since the run began. */
   engineLog?: string;
@@ -193,6 +198,10 @@ export interface AuditionResult {
   srcPort: number; devicePort: number;
   ready: boolean; silenced: boolean; auditionLevelRestored: boolean;
   phases: PhaseResult[];
+  /** The rest/still/settle ceiling this run judged against (linear). */
+  restMaxPeak: number;
+  /** Highest `serverCpu` (%) reported by the status polls while the phases played. */
+  serverCpuMax?: number;
   errors: string[];        // engine-log lines matching ERROR_RE since the run began
   notes: string[];
   table: string;
@@ -201,7 +210,7 @@ export interface AuditionResult {
 export const dbfs = (x: number) => (x > 0 ? 20 * Math.log10(x) : -Infinity);
 const fmtDb = (x: number) => { const d = dbfs(x); return Number.isFinite(d) ? d.toFixed(1) : '-inf'; };
 
-export function formatTable(phases: PhaseResult[]): string {
+export function formatTable(phases: PhaseResult[], o: { restMaxPeak?: number; serverCpuMax?: number } = {}): string {
   const rows = [['phase', 'seconds', 'peak dBFS', 'rms dBFS', 'verdict']];
   for (const p of phases) {
     const settled = QUIET.has(p.name) && p.settledSamples > 0 ? ` (settled ${fmtDb(p.peakSettled)})` : '';
@@ -209,13 +218,18 @@ export function formatTable(phases: PhaseResult[]): string {
   }
   const w = rows[0]!.map((_, c) => Math.max(...rows.map((r) => r[c]!.length)));
   const line = (r: string[]) => r.map((cell, c) => cell.padEnd(w[c]!)).join(' | ');
-  return [line(rows[0]!), w.map((n) => '-'.repeat(n)).join('-|-'), ...rows.slice(1).map(line)].join('\n');
+  const cpu = o.serverCpuMax === undefined ? 'n/a' : `${o.serverCpuMax.toFixed(1)} %`;
+  return [
+    `rest ceiling ${fmtDb(o.restMaxPeak ?? DEFAULT_REST_MAX_PEAK)} dBFS (settled peak of rest/still/settle)`,
+    line(rows[0]!), w.map((n) => '-'.repeat(n)).join('-|-'), ...rows.slice(1).map(line),
+    `server cpu (max) ${cpu}`,
+  ].join('\n');
 }
 
-export function verdictFor(phase: Phase, r: { peak: number; samples: number; peakSettled: number; settledSamples: number }): { verdict: 'ok' | 'fail'; why?: string } {
+export function verdictFor(phase: Phase, r: { peak: number; samples: number; peakSettled: number; settledSamples: number }, o: { restMaxPeak?: number } = {}): { verdict: 'ok' | 'fail'; why?: string } {
   if (r.samples === 0) return { verdict: 'fail', why: 'no levels received' };
   if (r.peak > CLIP) return { verdict: 'fail', why: `clipping: peak > ${fmtDb(CLIP)} dBFS` };
-  const e = expected(phase);
+  const e = expected(phase, o.restMaxPeak === undefined ? {} : { restMaxPeak: o.restMaxPeak });
   if (e.minPeak !== undefined && r.peak < e.minPeak) return { verdict: 'fail', why: `peak < ${fmtDb(e.minPeak)} dBFS` };
   if (e.maxPeak !== undefined) {
     // quiet phases: judged after their grace (release tails); a phase too short to have settled
@@ -256,6 +270,7 @@ export async function runAudition(opts: AuditionOptions): Promise<AuditionResult
   const result: AuditionResult = {
     outcome: 'couldNotRun', srcPort: opts.srcPort, devicePort: opts.srcPort + AUDITION_SLOT - 1,
     ready: false, silenced: false, auditionLevelRestored: false, phases: [], errors: [], notes: [], table: '',
+    restMaxPeak: opts.restMaxPeak ?? DEFAULT_REST_MAX_PEAK,
   };
   const logFrom = logSize(opts.engineLog);
   let pose: (tSec: number) => Pose = () => REST;
@@ -359,8 +374,14 @@ export async function runAudition(opts: AuditionOptions): Promise<AuditionResult
     } else {
       log(`[audition] ${opts.patch} ready after ${Math.round(now() - readyT0)} ms`);
 
-      // 5. phases, polling status at 5 Hz (keeps the levels broadcast pointed at us)
-      pollTimer = setInterval(() => { void link.getStatus(t.askMs); }, t.pollMs);
+      // 5. phases, polling status at 5 Hz (keeps the levels broadcast pointed at us); serverCpu
+      // from each reply is max-held while a phase is playing.
+      pollTimer = setInterval(() => {
+        void link.getStatus(t.askMs).then((st) => {
+          const cpu = Number(st?.serverCpu);
+          if (current && st && Number.isFinite(cpu)) result.serverCpuMax = Math.max(result.serverCpuMax ?? 0, cpu);
+        });
+      }, t.pollMs);
       pollTimer.unref();
       for (let i = 0; i < opts.phases.length; i++) {
         const phase = opts.phases[i]!;
@@ -377,7 +398,7 @@ export async function runAudition(opts: AuditionOptions): Promise<AuditionResult
         if (preload) link.send('/airkit/cos/level', ['audition', 1, 0.1], 'sff');
         const pr: PhaseResult = {
           name: phase.name, seconds: phase.seconds, peak: c.peak, rms: c.rms, samples: c.samples,
-          peakSettled: c.peakSettled, settledSamples: c.settledSamples, ...verdictFor(phase, c),
+          peakSettled: c.peakSettled, settledSamples: c.settledSamples, ...verdictFor(phase, c, { restMaxPeak: result.restMaxPeak }),
         };
         if (phase.label) pr.label = phase.label;
         result.phases.push(pr);
@@ -441,7 +462,9 @@ export async function runAudition(opts: AuditionOptions): Promise<AuditionResult
     if (pollTimer) clearInterval(pollTimer);
     if (imuTimer) clearInterval(imuTimer);
     link.close();
-    result.table = formatTable(result.phases);
+    result.table = formatTable(result.phases, result.serverCpuMax === undefined
+      ? { restMaxPeak: result.restMaxPeak }
+      : { restMaxPeak: result.restMaxPeak, serverCpuMax: result.serverCpuMax });
   }
 }
 

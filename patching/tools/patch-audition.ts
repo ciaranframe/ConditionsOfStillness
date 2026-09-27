@@ -2,7 +2,9 @@
 // through a private device (source port --src, device port src + 8) and reports levels per phase.
 //
 // Usage: node patching/tools/patch-audition.ts <Name> [--engine auto|running|boot]
-//          [--quick|--long|--take <label>] [--params k=v,...] [--src 9101] [--keep]
+//          [--quick|--long|--take <label>] [--params k=v,...] [--rest-max <dBFS>] [--src 9101] [--keep]
+// --rest-max: the ceiling for rest/still/settle in dBFS (default −34, i.e. 0.02 linear) — raise it
+// for a patch whose note designs an audible rest; the after-unload silence check stays strict.
 // --engine auto (default): the running engine on 57120 if it answers getStatus within 1 s, else a
 // private boot on 57130/57131 (log ~/.conditions/audition.log), killed on exit unless --keep.
 // Exit 0 AUDITION PASS, 1 FAIL, 2 could not run / usage.
@@ -15,7 +17,7 @@ import { longPhases, quickPhases, syntheticPhases, takePhases, type Phase } from
 import { repoRoot } from './src/sc.ts';
 import { encodeMessage } from '../../scripts/lib/osc.ts';
 
-const USAGE = 'usage: patch-audition.ts <Name> [--engine auto|running|boot] [--quick|--long|--take <label>] [--params k=v,...] [--src 9101] [--keep]';
+const USAGE = 'usage: patch-audition.ts <Name> [--engine auto|running|boot] [--quick|--long|--take <label>] [--params k=v,...] [--rest-max <dBFS>] [--src 9101] [--keep]';
 const HOST = '127.0.0.1';
 const RUNNING_PORT = 57120;
 const BOOT_LANG = 57130, BOOT_SCSYNTH = 57131;
@@ -31,6 +33,7 @@ let engineMode = 'auto';
 let phaseMode: 'synthetic' | 'quick' | 'long' | 'take' = 'synthetic';
 let takeLabel = '';
 let paramsArg = '';
+let restMaxArg: string | undefined;
 let src = 9101;
 let keep = false;
 const positional: string[] = [];
@@ -42,6 +45,7 @@ for (let i = 0; i < argv.length; i++) {
     case '--long': phaseMode = 'long'; break;
     case '--take': phaseMode = 'take'; takeLabel = argv[++i] ?? ''; break;
     case '--params': paramsArg = argv[++i] ?? ''; break;
+    case '--rest-max': restMaxArg = argv[++i] ?? ''; break;
     case '--src': src = Number(argv[++i]); break;
     case '--keep': keep = true; break;
     default:
@@ -55,6 +59,13 @@ if (!['auto', 'running', 'boot'].includes(engineMode)) usage('--engine must be a
 if (!Number.isInteger(src) || src < 1024 || src > 65535 - 8) usage('--src must be a port number');
 if (src + 8 >= 9001 && src <= 9009) usage('--src must keep the device ports clear of the runner\'s 9001–9009');
 if (phaseMode === 'take' && !takeLabel) usage('--take needs a <label>');
+let restMaxPeak: number | undefined;
+if (restMaxArg !== undefined) {
+  const db = Number(restMaxArg);
+  // strictly below the 0.98 clip ceiling (≈ −0.2 dBFS), so a rest phase can never pass a clip
+  if (restMaxArg.trim() === '' || !Number.isFinite(db) || db >= -0.2) usage('--rest-max must be a dBFS value below -0.2 (e.g. -20)');
+  restMaxPeak = 10 ** (db / 20);
+}
 
 const params: Record<string, string | number> = {};
 if (paramsArg) {
@@ -120,6 +131,7 @@ try {
     const t0 = Date.now();
     const result = await runAudition({
       host: HOST, port, srcPort: src, patch, phases, params, engineLog,
+      ...(restMaxPeak === undefined ? {} : { restMaxPeak }),
       onLoaded: (enginePort, devicePort) => { loadedAt = { enginePort, devicePort }; },
     });
     console.log('');
