@@ -3,8 +3,9 @@
 // ffmpeg, and writes manifest.json and a SOURCES.md skeleton (Task 7, spec §8).
 //
 // Usage: node patching/tools/samples-check.ts COS_<Name> [--dir samples/]
-// Exit 0 every slot converted (warnings allowed), 1 any slot missing/unreadable or an unmatched
-// audio file exists (Review Focus 5), 2 usage or no SHOPPING.md.
+// Exit 0 every slot converted (warnings allowed), 1 any slot missing/unreadable/failed-to-
+// convert or an audio file matches no slot (Review Focus 5), 2 usage, no SHOPPING.md, or a
+// malformed SHOPPING.md/SOURCES.md (a usage-class error — checkSamples throws for those).
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { checkSamples } from './src/samples.ts';
@@ -40,6 +41,11 @@ const dir = join(root, name);
 const shoppingPath = join(dir, 'SHOPPING.md');
 if (!existsSync(shoppingPath)) fail(`no SHOPPING.md at ${shoppingPath}`);
 
-const result = checkSamples(dir);
+let result;
+try {
+  result = checkSamples(dir);
+} catch (e) {
+  fail((e as Error).message);
+}
 for (const line of result.lines) console.log(line);
 process.exit(result.exitCode);

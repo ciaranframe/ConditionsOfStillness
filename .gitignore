@@ -17,6 +17,7 @@ samples/**/*.aiff
 samples/**/*.mp3
 samples/**/*.flac
 samples/**/*.ogg
+samples/**/*.m4a
 samples/**/wav/
 # recorded wrist takes (INDEX.md is committed)
 takes/*.take.jsonl
