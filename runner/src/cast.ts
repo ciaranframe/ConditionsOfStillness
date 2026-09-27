@@ -34,7 +34,8 @@ export function parseCast(text: string): { cast: Cast; errors: string[] } {
   const errors: string[] = [];
   let doc: unknown;
   try { doc = parseYaml(text); } catch (e) { return { cast: structuredClone(DEFAULT_CAST), errors: [`yaml: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}`] }; }
-  const root = isRecord(doc) ? doc : {};
+  if (!isRecord(doc)) return { cast: structuredClone(DEFAULT_CAST), errors: ['yaml: top level must be a mapping (sticks, pedal, network)'] };
+  const root = doc;
   const cast = structuredClone(DEFAULT_CAST);
   const sticks = isRecord(root.sticks) ? root.sticks : {};
   for (const w of WRISTS) {

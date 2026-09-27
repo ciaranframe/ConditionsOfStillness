@@ -63,3 +63,11 @@ test('parseCast on malformed yaml returns defaults with a yaml error', () => {
   assert.equal(cast.network.webPort, DEFAULT_CAST.network.webPort);
   assert.match(errors[0]!, /^yaml:/);
 });
+
+test('an empty or non-mapping file is unusable: defaults plus a yaml: error', () => {
+  for (const text of ['', '   \n', '- a\n', '42\n']) {
+    const { cast, errors } = parseCast(text);
+    assert.deepEqual(cast, DEFAULT_CAST, JSON.stringify(text));
+    assert.ok(errors.length === 1 && errors[0]!.startsWith('yaml:'), JSON.stringify(text));
+  }
+});

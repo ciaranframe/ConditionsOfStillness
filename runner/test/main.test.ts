@@ -51,6 +51,16 @@ test('boots from the shipped files, forwards a mapped stick to both slots, reloa
   view = await (await fetch(`http://127.0.0.1:${r.webPort}/api/view`)).json();
   assert.equal(view.castError, null);
   assert.equal(view.wrists.CL.label, 'B1');
+  // an empty cast.yaml (a save truncated to zero bytes) is unusable too
+  writeFileSync(join(root, 'scenes/cast.yaml'), '');
+  await sleep(600);
+  view = await (await fetch(`http://127.0.0.1:${r.webPort}/api/view`)).json();
+  assert.equal(view.wrists.CL.label, 'B1', 'previous cast kept after an empty file');
+  assert.match(view.castError ?? '', /yaml/);
+  writeFileSync(join(root, 'scenes/cast.yaml'), castGood);
+  await sleep(600);
+  view = await (await fetch(`http://127.0.0.1:${r.webPort}/api/view`)).json();
+  assert.equal(view.castError, null);
   // scenes edit: make scene A silence-only → after reload, the STANDBY preload of slot 2 is replaced by silence
   writeFileSync(join(root, 'scenes/conditions.yaml'), 'piece: T\nscenes:\n  - { id: A, name: Quiet, sounds: { ZL: silence } }\n');
   await sleep(600);
