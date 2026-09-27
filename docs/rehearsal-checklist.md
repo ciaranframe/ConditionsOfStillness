@@ -7,3 +7,11 @@
 6. Audition a patch on one wrist from Admin; turn it off.
 7. PANIC, then RESUME.
 8. Batteries above 50 % before the run.
+
+## Recovery drills
+Run these once in the room, mid-scene, with the sticks moving and the sound audible.
+1. Kill the runner mid-scene (Ctrl-C the runner, or `kill` its process): `run.sh` restarts it and it comes back in the same scene. A healthy engine keeps sounding through the restart — nothing is reloaded whose seat already matches.
+2. Restart the engine (quit sclang; `run.sh` restarts it): AIRKIT goes OFFLINE, then OK; the scene comes back within a few seconds after the engine has booted.
+3. Reload the Admin page on the iPad (and the Perform page): both reconnect and show the same scene, nothing changes in the sound.
+4. PANIC, then press the footswitch (and NEXT on Perform): nothing happens — the log says `cue ignored — PANIC, resume from Admin`; Admin's BACK/NEXT and scene rows are disabled.
+5. RESUME from Admin: the current scene comes back; the footswitch cues again.
