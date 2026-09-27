@@ -80,15 +80,23 @@ let engine: BootedEngine | null = null;
 let port = RUNNING_PORT;
 let engineLog: string | undefined = join(homedir(), '.conditions', 'airkit.log');
 let code = 2;
-// Ctrl-C mid-run: leave the private device silent (matters on a running engine), then clean up.
+// The load this run actually sent (engine port, device port), set by runAudition's onLoaded.
+let loadedAt: { enginePort: number; devicePort: number } | null = null;
+// Ctrl-C/SIGTERM: if a load went out, silence that device on the engine it went to (never a
+// guess at 57120); kill a private engine whenever one was spawned, even mid-boot.
+let signalled = false;
 const onSignal = () => {
+  if (signalled) return;
+  signalled = true;
   void (async () => {
-    const sock = createSocket('udp4');
-    try {
-      sock.send(encodeMessage('/airkit/loadPersonality', [src + 8, 0], 'ii'), port, HOST);
-      sock.send(encodeMessage('/airkit/cos/level', ['audition', 1, 0.1], 'sff'), port, HOST);
-      await new Promise<void>((r) => setTimeout(r, 100));
-    } finally { sock.close(); }
+    if (loadedAt) {
+      const sock = createSocket('udp4');
+      try {
+        sock.send(encodeMessage('/airkit/loadPersonality', [loadedAt.devicePort, 0], 'ii'), loadedAt.enginePort, HOST);
+        sock.send(encodeMessage('/airkit/cos/level', ['audition', 1, 0.1], 'sff'), loadedAt.enginePort, HOST);
+        await new Promise<void>((r) => setTimeout(r, 100));
+      } finally { sock.close(); }
+    }
     if (engine && !keep) await killEngine(engine);
     process.exit(130);
   })();
@@ -105,12 +113,15 @@ try {
     if (useRunning) {
       console.log(`[audition] using the running engine on ${RUNNING_PORT}`);
     } else {
-      engine = await bootEngine({ langPort: BOOT_LANG, scsynthPort: BOOT_SCSYNTH, log: (m) => console.log(m) });
+      engine = await bootEngine({ langPort: BOOT_LANG, scsynthPort: BOOT_SCSYNTH, log: (m) => console.log(m), onSpawn: (e) => { engine = e; } });
       port = BOOT_LANG;
       engineLog = engine.logPath;
     }
     const t0 = Date.now();
-    const result = await runAudition({ host: HOST, port, srcPort: src, patch, phases, params, engineLog });
+    const result = await runAudition({
+      host: HOST, port, srcPort: src, patch, phases, params, engineLog,
+      onLoaded: (enginePort, devicePort) => { loadedAt = { enginePort, devicePort }; },
+    });
     console.log('');
     for (const n of result.notes) console.log(`note: ${n}`);
     if (result.phases.length) console.log(result.table);

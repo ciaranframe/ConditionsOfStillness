@@ -8,6 +8,13 @@
 // at 5 Hz so the levels broadcast stays pointed at us; audition peak/rms max-held per phase) →
 // load silence, check silence, audition level left at 1 → scan the engine log for errors.
 //
+// Levels per phase keep two maxima. `peakAll` covers every levels message received while the
+// phase plays and is checked against the 0.98 clip ceiling and, for shake/strike, the minPeak
+// onset floor. `peakSettled` skips the phase's first 0.5 s (graceMs) and is used only for the
+// 0.02 ceiling of the quiet phases (rest/still/settle): quiet phases ignore their first 0.5 s
+// for release tails of whatever played before them. The log scan covers the audition only (from
+// the byte offset at which runAudition started), not the engine's boot.
+//
 // EngineLink's bind/ask/reply-matching pattern is copied from runner/src/airkit.ts (AirkitLink,
 // itself after the Glimmer show engine's sticks/airkit.ts, Ciaran Frame 2026); bootEngine /
 // killEngine follow scripts/engine-smoke.ts's recipe.
@@ -24,6 +31,8 @@ import { SCLANG, airkitRoot, repoRoot } from './sc.ts';
 export const AUDITION_SLOT = 9;
 const REST: Pose = { a: [0, 0, -9.8], q: [0, 0, 0, 1] };
 const ERROR_RE = /ERROR|not understood|DoesNotUnderstand|FAILURE/;
+const CLIP = 0.98;
+const QUIET = new Set(['rest', 'still', 'settle']);
 
 const now = () => performance.now();
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms).unref());
@@ -152,7 +161,7 @@ export async function probeEngine(host: string, port: number, ms = 1000): Promis
 export interface AuditionTimeouts {
   askMs: number; seatsMs: number; readyMs: number; silenceMs: number; pollMs: number; imuHz: number; graceMs: number;
 }
-const DEFAULT_TIMEOUTS: AuditionTimeouts = { askMs: 1000, seatsMs: 2000, readyMs: 5000, silenceMs: 1000, pollMs: 200, imuHz: 100, graceMs: 300 };
+const DEFAULT_TIMEOUTS: AuditionTimeouts = { askMs: 1000, seatsMs: 2000, readyMs: 5000, silenceMs: 1000, pollMs: 200, imuHz: 100, graceMs: 500 };
 
 export interface AuditionOptions {
   host: string; port: number; srcPort: number; patch: string; phases: Phase[];
@@ -164,10 +173,16 @@ export interface AuditionOptions {
   /** Test/diagnostic hooks: called as each phase starts, and once after the last one ends. */
   onPhase?: (phase: Phase, index: number) => void;
   onPhasesDone?: () => void;
+  /** Called right after the patch load is sent: the engine port it went to and the device port. */
+  onLoaded?: (enginePort: number, devicePort: number) => void;
 }
 
 export interface PhaseResult {
-  name: string; label?: string; seconds: number; peak: number; rms: number; samples: number;
+  name: string; label?: string; seconds: number;
+  /** max over every levels message during the phase (clip ceiling, onset floor). */
+  peak: number; rms: number; samples: number;
+  /** max over messages after the first graceMs (quiet-phase ceiling only). */
+  peakSettled: number; settledSamples: number;
   verdict: 'ok' | 'fail'; why?: string;
 }
 
@@ -189,18 +204,26 @@ const fmtDb = (x: number) => { const d = dbfs(x); return Number.isFinite(d) ? d.
 export function formatTable(phases: PhaseResult[]): string {
   const rows = [['phase', 'seconds', 'peak dBFS', 'rms dBFS', 'verdict']];
   for (const p of phases) {
-    rows.push([p.label ?? p.name, String(Math.round(p.seconds * 100) / 100), fmtDb(p.peak), fmtDb(p.rms), p.verdict === 'ok' ? 'ok' : `FAIL ${p.why ?? ''}`.trim()]);
+    const settled = QUIET.has(p.name) && p.settledSamples > 0 ? ` (settled ${fmtDb(p.peakSettled)})` : '';
+    rows.push([p.label ?? p.name, String(Math.round(p.seconds * 100) / 100), fmtDb(p.peak), fmtDb(p.rms), (p.verdict === 'ok' ? 'ok' : `FAIL ${p.why ?? ''}`.trim()) + settled]);
   }
   const w = rows[0]!.map((_, c) => Math.max(...rows.map((r) => r[c]!.length)));
   const line = (r: string[]) => r.map((cell, c) => cell.padEnd(w[c]!)).join(' | ');
   return [line(rows[0]!), w.map((n) => '-'.repeat(n)).join('-|-'), ...rows.slice(1).map(line)].join('\n');
 }
 
-function verdictFor(phase: Phase, peak: number, samples: number): { verdict: 'ok' | 'fail'; why?: string } {
-  if (samples === 0) return { verdict: 'fail', why: 'no levels received' };
+export function verdictFor(phase: Phase, r: { peak: number; samples: number; peakSettled: number; settledSamples: number }): { verdict: 'ok' | 'fail'; why?: string } {
+  if (r.samples === 0) return { verdict: 'fail', why: 'no levels received' };
+  if (r.peak > CLIP) return { verdict: 'fail', why: `clipping: peak > ${fmtDb(CLIP)} dBFS` };
   const e = expected(phase);
-  if (e.minPeak !== undefined && peak < e.minPeak) return { verdict: 'fail', why: `peak < ${fmtDb(e.minPeak)} dBFS` };
-  if (e.maxPeak !== undefined && peak > e.maxPeak) return { verdict: 'fail', why: `peak > ${fmtDb(e.maxPeak)} dBFS` };
+  if (e.minPeak !== undefined && r.peak < e.minPeak) return { verdict: 'fail', why: `peak < ${fmtDb(e.minPeak)} dBFS` };
+  if (e.maxPeak !== undefined) {
+    // quiet phases: judged after their grace (release tails); a phase too short to have settled
+    // samples falls back to every sample.
+    const quiet = QUIET.has(phase.name);
+    const v = quiet && r.settledSamples > 0 ? r.peakSettled : r.peak;
+    if (v > e.maxPeak) return { verdict: 'fail', why: `${quiet ? 'settled peak' : 'peak'} > ${fmtDb(e.maxPeak)} dBFS` };
+  }
   return { verdict: 'ok' };
 }
 
@@ -242,15 +265,20 @@ export async function runAudition(opts: AuditionOptions): Promise<AuditionResult
   let loaded = false;
   let unloaded = false;
 
-  // Levels: max-hold of the audition peak/rms into whichever phase is current (after its grace).
-  let current: { peak: number; rms: number; samples: number; since: number } | null = null;
+  // Levels: max-hold of the audition peak/rms into whichever phase is current — every sample
+  // into peak/rms, and those after the grace into peakSettled.
+  type Acc = { peak: number; rms: number; samples: number; peakSettled: number; settledSamples: number; since: number };
+  let current: Acc | null = null;
   let lastAuditionPeak: { value: number; at: number } | null = null;
   link.onLevels((f) => {
     lastAuditionPeak = { value: f[8]!, at: now() };
-    if (current && now() - current.since >= t.graceMs) {
-      current.peak = Math.max(current.peak, f[8]!);
-      current.rms = Math.max(current.rms, f[9]!);
-      current.samples++;
+    if (!current) return;
+    current.peak = Math.max(current.peak, f[8]!);
+    current.rms = Math.max(current.rms, f[9]!);
+    current.samples++;
+    if (now() - current.since >= t.graceMs) {
+      current.peakSettled = Math.max(current.peakSettled, f[8]!);
+      current.settledSamples++;
     }
   });
 
@@ -305,6 +333,7 @@ export async function runAudition(opts: AuditionOptions): Promise<AuditionResult
     link.send('/airkit/cos/level', ['audition', 1, 0.1], 'sff');
     link.send('/airkit/loadPersonality', [devicePort, index], 'ii');
     loaded = true;
+    opts.onLoaded?.(opts.port, devicePort);
     log(`[audition] loading ${opts.patch} (roster index ${index}) on port ${devicePort}`);
 
     const readyT0 = now();
@@ -319,7 +348,8 @@ export async function runAudition(opts: AuditionOptions): Promise<AuditionResult
       const s = await link.getSeats(t.askMs);
       if (s?.[devicePort] === opts.patch) {
         result.ready = true;
-        result.notes.push('ready inferred from getSeats (status slot 9 described the other device)');
+        result.notes.push('ready inferred from getSeats and UNVERIFIED (status slot 9 described the other index-9 device)');
+        log(`[audition] ready inferred from getSeats (${devicePort} shows ${opts.patch}); unverified — status slot 9 describes the other index-9 device`);
       }
     }
     if (!result.ready) {
@@ -334,10 +364,10 @@ export async function runAudition(opts: AuditionOptions): Promise<AuditionResult
       pollTimer.unref();
       for (let i = 0; i < opts.phases.length; i++) {
         const phase = opts.phases[i]!;
-        const preload = phase.label?.startsWith('preloaded') ?? false;
+        const preload = phase.preload === true;
         if (preload) link.send('/airkit/cos/level', ['audition', 0, 0.1], 'sff');
         opts.onPhase?.(phase, i);
-        current = { peak: 0, rms: 0, samples: 0, since: now() };
+        current = { peak: 0, rms: 0, samples: 0, peakSettled: 0, settledSamples: 0, since: now() };
         poseStart = now();
         pose = phase.pose;
         log(`[audition] phase ${phase.label ?? phase.name} (${phase.seconds} s)`);
@@ -345,7 +375,10 @@ export async function runAudition(opts: AuditionOptions): Promise<AuditionResult
         const c = current;
         current = null;
         if (preload) link.send('/airkit/cos/level', ['audition', 1, 0.1], 'sff');
-        const pr: PhaseResult = { name: phase.name, seconds: phase.seconds, peak: c.peak, rms: c.rms, samples: c.samples, ...verdictFor(phase, c.peak, c.samples) };
+        const pr: PhaseResult = {
+          name: phase.name, seconds: phase.seconds, peak: c.peak, rms: c.rms, samples: c.samples,
+          peakSettled: c.peakSettled, settledSamples: c.settledSamples, ...verdictFor(phase, c),
+        };
         if (phase.label) pr.label = phase.label;
         result.phases.push(pr);
       }
@@ -358,8 +391,10 @@ export async function runAudition(opts: AuditionOptions): Promise<AuditionResult
     link.send('/airkit/loadPersonality', [devicePort, 0], 'ii');
     unloaded = true;
     if (!pollTimer) { pollTimer = setInterval(() => { void link.getStatus(t.askMs); }, t.pollMs); pollTimer.unref(); }
-    while (now() - unloadAt < t.silenceMs + 150) {
-      await sleep(50);
+    // silent = a levels message at least 150 ms after the unload (fresh audio, not the max-hold of
+    // what played before it) with peak < 0.01, all within silenceMs.
+    while (now() - unloadAt < t.silenceMs) {
+      await sleep(25);
       const lp = lastAuditionPeak as { value: number; at: number } | null;
       if (lp && lp.at - unloadAt >= 150 && lp.value < 0.01) { result.silenced = true; break; }
     }
@@ -367,10 +402,18 @@ export async function runAudition(opts: AuditionOptions): Promise<AuditionResult
     const s = await link.getSeats(t.askMs);
     if (s?.[devicePort] !== 'silence') { result.silenced = false; log(`[audition] port ${devicePort} is on ${s?.[devicePort] ?? '?'}, not silence`); }
     link.send('/airkit/cos/level', ['audition', 1, 0.1], 'sff');
-    await sleep(100);
-    const st = await link.getStatus(t.askMs);
-    result.auditionLevelRestored = st?.auditionLevel === 1;
-    if (!result.auditionLevelRestored) log(`[audition] auditionLevel is ${st?.auditionLevel}, expected 1`);
+    // stop the background poll so its replies can't be taken for ours; retry up to 500 ms.
+    clearInterval(pollTimer);
+    pollTimer = null;
+    let lastLevel: number | undefined;
+    const levelT0 = now();
+    while (now() - levelT0 < 500) {
+      const st = await link.getStatus(Math.max(50, Math.min(t.askMs, 500 - (now() - levelT0))));
+      lastLevel = st?.auditionLevel;
+      if (lastLevel === 1) { result.auditionLevelRestored = true; break; }
+      await sleep(50);
+    }
+    if (!result.auditionLevelRestored) log(`[audition] auditionLevel is ${lastLevel}, expected 1`);
 
     // 7. engine log
     result.errors = scanLog(opts.engineLog, logFrom);
@@ -410,7 +453,7 @@ export function defaultBootLog(): string { return join(homedir(), '.conditions',
 
 /** Boots `main_conditions.scd` on langPort/scsynthPort (57130/57131) with COS_SAMPLES = the repo's
  * samples/, logging to `logPath`; resolves once the log says `Conditions AirKit up` (≤ timeoutMs). */
-export async function bootEngine(o: { langPort?: number; scsynthPort?: number; logPath?: string; timeoutMs?: number; log?: (m: string) => void } = {}): Promise<BootedEngine> {
+export async function bootEngine(o: { langPort?: number; scsynthPort?: number; logPath?: string; timeoutMs?: number; log?: (m: string) => void; onSpawn?: (e: BootedEngine) => void } = {}): Promise<BootedEngine> {
   const langPort = o.langPort ?? 57130;
   const scsynthPort = o.scsynthPort ?? 57131;
   const logPath = o.logPath ?? defaultBootLog();
@@ -426,6 +469,7 @@ export async function bootEngine(o: { langPort?: number; scsynthPort?: number; l
   });
   closeSync(fd);
   const engine: BootedEngine = { child, langPort, scsynthPort, logPath };
+  o.onSpawn?.(engine);   // published at once, so a signal during the boot can still kill it
   let exited = false;
   child.once('exit', () => { exited = true; });
   const t0 = now();

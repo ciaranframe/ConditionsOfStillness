@@ -17,6 +17,9 @@ export interface Phase {
   /** t in seconds from the phase's own start (not the take/timeline start). */
   pose: (t: number) => Pose;
   label?: string;
+  /** Played with the audition monitor at level 0 (heard nothing), then back to 1: the patch runs
+   * preloaded-but-unheard, as on a standby slot (Task 6's `--long`). */
+  preload?: boolean;
 }
 
 const GRAVITY = 9.8;
@@ -141,7 +144,7 @@ export function quickPhases(): Phase[] {
 export function longPhases(): Phase[] {
   const phases = syntheticPhases();
   const shakeIndex = phases.findIndex((p) => p.name === 'shake');
-  const inserted = stillPhase(60, 'preloaded 60 s');
+  const inserted: Phase = { ...stillPhase(60, 'preloaded 60 s'), preload: true };
   return [...phases.slice(0, shakeIndex), inserted, ...phases.slice(shakeIndex)];
 }
 

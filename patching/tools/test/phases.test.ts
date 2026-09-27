@@ -76,6 +76,8 @@ test('longPhases: syntheticPhases with a 60 s still inserted right before shake'
   assert.equal(inserted.name, 'still');
   assert.equal(inserted.seconds, 60);
   assert.equal(inserted.label, 'preloaded 60 s');
+  assert.equal(inserted.preload, true);
+  assert.ok(long.filter((p) => p !== inserted).every((p) => !p.preload), 'only the inserted phase is a preload');
 
   // everything else matches syntheticPhases(), in the same relative order.
   const withoutInserted = long.filter((_, i) => i !== shakeIndex - 1);
