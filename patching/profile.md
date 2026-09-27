@@ -1,3 +1,15 @@
+---
+prefix: COS_
+synthdefPrefix: cos
+roster: airkit/lists/list_conditions.sc
+personalities: airkit/personalities
+template: airkit/personalities/COS_Template.sc
+headerKeys: [gestures, description, internals, sound, pitch, rhythm, family, params, samples, research]
+optionalHeaderKeys: [internals, research]
+samplesVar: cosSamples
+plugins: true
+gestureWords: [sway, shake, tilt, strike, stillness, hold, turn, flip, twist, roll, direction]
+---
 # Conditions of Stillness — piece profile
 
 What `/airkit-patch` and its tools need to know about this piece, so the skill itself can stay
