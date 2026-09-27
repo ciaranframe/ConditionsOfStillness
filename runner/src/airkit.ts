@@ -36,6 +36,7 @@ export class AirkitLink extends EventEmitter {
   private _status: EngineStatus | null = null;
   private _levels: Levels | null = null;
   private _lastStatusAt = -Infinity;
+  private _seatsAsked = 0;              // getSeats requests sent so far: a seats reply answers one sent before it
   private sourcePort: number;
   private clock: () => number;
   private log: (m: string) => void;
@@ -63,6 +64,7 @@ export class AirkitLink extends EventEmitter {
   get status() { return this._status; }
   get levels() { return this._levels; }
   get lastStatusAt() { return this._lastStatusAt; }
+  get seatsAsked() { return this._seatsAsked; }
 
   portOf(slot: number) { return this.sourcePort + slot - 1; }
 
@@ -100,6 +102,7 @@ export class AirkitLink extends EventEmitter {
 
   private send(address: string, args: OscArg[] = [], types?: string) {
     if (this.closed || !this.bound) return;
+    if (address === '/airkit/getSeats') this._seatsAsked++;
     this.sock.send(encodeMessage(address, args, types), this.opts.port, this.opts.host);
   }
 

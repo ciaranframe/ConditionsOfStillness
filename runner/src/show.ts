@@ -1,7 +1,7 @@
 // The show: scene state, one runtime record per wrist, cues → crossfades. Owns every timer.
 // Spec §5 (load and fade sequence), §5.1 (engine facts), §6 (state); plan rulings 1–4.
 import { EventEmitter } from 'node:events';
-import { WRISTS, SILENCE, STANDBY_INDEX, standbyScene, sameSound, sameParams, dbToGain, slotsOf, type Scene, type Sound, type Wrist } from './scenes.ts';
+import { WRISTS, SILENCE, STANDBY_INDEX, AUDITION_SLOT, standbyScene, sameSound, sameParams, dbToGain, slotsOf, type Scene, type Sound, type Wrist } from './scenes.ts';
 import type { Cast } from './cast.ts';
 import type { AirkitLink } from './airkit.ts';
 import type { StateStore } from './state.ts';
@@ -44,7 +44,11 @@ export class Show extends EventEmitter {
   auditionState: { wrist: Wrist; patch: string } | null = null;
 
   private cueSeq = 0;
+  private pushing = 0;                     // pushAll calls in progress: reconcile waits for them
+  private attempts = new Map<number, { live: string; desired: string; count: number; gaveUp: boolean }>();   // slot → situation (idea from Glimmer's AirkitLink.reconcile)
   private onOnline = () => { void this.pushAll(); };
+  private onSeats = (seats: Record<number, string>) => this.reconcile(seats);
+  private loadedAtAsk = new Map<number, number>();   // slot → airkit.seatsAsked when we last loaded it
   private airkit: AirkitLink;
   private cast: () => Cast;
   private store: StateStore;
@@ -94,9 +98,15 @@ export class Show extends EventEmitter {
     return slotsOf(desired.partner)[this.targetSlotFor(desired.partner, scene.sounds[desired.partner])];
   }
 
+  // Every load goes through here so reconcile can tell a seats reply that predates it (asked before the load) from real drift.
+  private load(slot: number, patch: string): void {
+    this.loadedAtAsk.set(slot, this.airkit.seatsAsked);
+    this.airkit.load(slot, patch);
+  }
+
   private unloadOutgoing(w: Wrist) {
     const rt = this.wrists[w]; const slot = slotsOf(w)[other(rt.liveSlot)];
-    this.airkit.params(slot, {}); this.airkit.partner(slot, null); this.airkit.load(slot, 'silence');
+    this.airkit.params(slot, {}); this.airkit.partner(slot, null); this.load(slot, 'silence');
     rt.standby = null; rt.standbyReady = true;
   }
   // Synchronous on purpose: the new cue's load lands on this same slot, and a delayed unload would clobber it.
@@ -149,7 +159,7 @@ export class Show extends EventEmitter {
           this.log(`${this.labelOf(w)}: slot ${slot} already holds ${desired.patch}`);
         } else {
           this.airkit.params(slot, desired.params); this.airkit.partner(slot, partnerSlot);
-          this.airkit.load(slot, desired.patch);
+          this.load(slot, desired.patch);
           rt.standby = desired; rt.standbyReady = false;
           this.log(`${this.labelOf(w)}: load slot ${slot} ← ${desired.patch}`);
         }
@@ -203,51 +213,184 @@ export class Show extends EventEmitter {
       if (rt.standby && sameSound(rt.standby, want)) continue;
       const slot = slotsOf(w)[other(rt.liveSlot)];
       this.airkit.params(slot, desired.params); this.airkit.partner(slot, this.partnerSlotFor(desired, n));
-      this.airkit.load(slot, desired.patch);
+      this.load(slot, desired.patch);
       rt.standby = desired.patch === 'silence' ? null : desired; rt.standbyReady = false;   // null = silence / free
       this.log(`${this.labelOf(w)}: preload slot ${slot} ← ${desired.patch}`);
     }
   }
 
-  // Task 7 replaces this with the restore-or-standby version; for now boot = pushAll when online.
+  // Ruling 2: restore the scene only from a recent state; trims and master always come back.
   async boot(): Promise<void> {
+    const s = this.store.load();
+    if (s) {
+      this.trims = { ...this.trims, ...s.trims };
+      if (typeof s.masterDb === 'number') this.masterDb = s.masterDb;
+      const age = this.wall() - s.savedAt;
+      if (age < this.restoreWindowMs && s.sceneIndex >= STANDBY_INDEX && s.sceneIndex < this.scenes.length) {
+        this.sceneIndex = s.sceneIndex;
+        this.log(`restored scene ${this.current.id} (saved ${Math.round(age / 1000)} s ago)`);
+      } else this.log('starting in STANDBY (no recent state)');
+    } else this.log('starting in STANDBY');
     for (const w of WRISTS) this.wrists[w] = { ...freshRuntime(), live: this.current.sounds[w] };
     this.airkit.on('online', this.onOnline);
+    this.airkit.on('seats', this.onSeats);
     if (this.airkit.online) await this.pushAll();
     this.changed();
+  }
+
+  // Supersede any waiting cue, drop every timer and fade, and land the model on the current scene
+  // (on silence while panicked) with liveSlot kept. Returns the new cue sequence number.
+  private resetForPush(): number {
+    const seq = ++this.cueSeq;
+    for (const w of WRISTS) {
+      const rt = this.wrists[w];
+      if (rt.unloadTimer) clearTimeout(rt.unloadTimer);
+      rt.unloadTimer = null; rt.fade = null; rt.loading = false; rt.standby = null; rt.standbyReady = true;
+      rt.live = this.panicked ? SILENCE : this.current.sounds[w];
+    }
+    this.attempts.clear();
+    return seq;
   }
 
   // Spec §5.1 re-push order: master → per-wrist level and xfade → params and partner for every slot → loads.
   // Supersedes any cue still waiting for ready and lands the model on the current scene with no fade in flight.
   async pushAll(): Promise<void> {
     this.log('re-pushing everything to the engine');
-    this.cueSeq++;
+    this.pushing++;
+    try {
+      const seq = this.resetForPush();
+      if (!(await this.airkit.ensureDevices())) this.log('some engine devices are missing; loads will be retried as seats appear', 'warn');
+      // A cue (or panic) that arrived during the device check would be clobbered by the loads below: re-plan on the newest target.
+      if (seq !== this.cueSeq) { this.log('state changed during the device check — re-pushing the newest target'); this.resetForPush(); }
+      const scene = this.current;
+      this.airkit.master(dbToGain(this.masterDb), 0.1);
+      for (const w of WRISTS) { const rt = this.wrists[w]; this.airkit.level(w, this.gainFor(w, rt.live), 0.1); this.airkit.xfade(w, rt.liveSlot, 0.1); }
+      for (const w of WRISTS) {
+        const rt = this.wrists[w]; const live = slotsOf(w)[rt.liveSlot], free = slotsOf(w)[other(rt.liveSlot)];
+        this.airkit.params(live, rt.live.params); this.airkit.partner(live, this.partnerSlotFor(rt.live, scene));
+        this.airkit.params(free, {}); this.airkit.partner(free, null);
+      }
+      this.airkit.params(AUDITION_SLOT, {}); this.airkit.partner(AUDITION_SLOT, null);
+      for (const w of WRISTS) {
+        const rt = this.wrists[w];
+        this.load(slotsOf(w)[rt.liveSlot], rt.live.patch);
+        this.load(slotsOf(w)[other(rt.liveSlot)], 'silence');
+      }
+      this.load(AUDITION_SLOT, this.auditionState?.patch ?? 'silence');
+      if (this.auditionState) { this.airkit.audition(this.auditionState.wrist); this.airkit.level('audition', 1, 0.1); }
+      if (!this.panicked) this.preloadNext();
+      this.changed();
+    } finally { this.pushing--; }
+  }
+
+  // What each slot should hold right now; wrists with a fade or a load in flight are left alone.
+  private expectedSeats(): Map<number, { patch: string; sound: Sound | null; scene: Scene }> {
+    const m = new Map<number, { patch: string; sound: Sound | null; scene: Scene }>();
+    for (const w of WRISTS) {
+      const rt = this.wrists[w]; if (rt.fade || rt.loading) continue;
+      m.set(slotsOf(w)[rt.liveSlot], { patch: rt.live.patch, sound: rt.live, scene: this.current });
+      m.set(slotsOf(w)[other(rt.liveSlot)], { patch: rt.standby?.patch ?? 'silence', sound: rt.standby, scene: this.nextScene ?? this.current });
+    }
+    m.set(AUDITION_SLOT, { patch: this.auditionState?.patch ?? 'silence', sound: null, scene: this.current });
+    return m;
+  }
+  // Re-issue a load whose seat drifted: 3 attempts per (slot, live, desired) situation, then give up until it changes.
+  reconcile(seats: Record<number, string>): void {
+    if (this.panicked || this.pushing > 0) return;
+    for (const [slot, want] of this.expectedSeats()) {
+      const desired = want.patch;
+      const live = seats[this.airkit.portOf(slot)];
+      if (live === undefined || live === desired) { this.attempts.delete(slot); continue; }
+      if (this.loadedAtAsk.get(slot) === this.airkit.seatsAsked) continue;   // no seats request since our last load: this reply predates it
+      let a = this.attempts.get(slot);
+      if (!a || a.live !== live || a.desired !== desired) { a = { live, desired, count: 0, gaveUp: false }; this.attempts.set(slot, a); }
+      if (a.gaveUp) continue;
+      a.count++;
+      this.airkit.params(slot, want.sound?.params ?? {});
+      this.airkit.partner(slot, want.sound ? this.partnerSlotFor(want.sound, want.scene) : null);
+      this.load(slot, desired);
+      this.log(`slot ${slot}: engine has ${live}, expected ${desired} — reloading (attempt ${a.count})`, 'warn');
+      if (a.count >= 3) { a.gaveUp = true; this.log(`slot ${slot}: ${desired} not converging, giving up until the expectation changes`, 'error'); }
+    }
+  }
+
+  // Spec §5.1: panic cancels every pending post-fade timer, or a stale one would load after the silence.
+  panic(): void {
     for (const w of WRISTS) {
       const rt = this.wrists[w];
       if (rt.unloadTimer) clearTimeout(rt.unloadTimer);
-      rt.unloadTimer = null; rt.fade = null; rt.loading = false; rt.standby = null; rt.standbyReady = true;
-      rt.live = this.current.sounds[w];          // liveSlot kept
+      rt.unloadTimer = null; rt.fade = null; rt.loading = false; rt.live = SILENCE; rt.standby = null; rt.standbyReady = true;
     }
-    if (!(await this.airkit.ensureDevices())) this.log('some engine devices are missing; loads will be refused until they appear', 'warn');
-    const scene = this.current;
-    this.airkit.master(dbToGain(this.masterDb), 0.1);
-    for (const w of WRISTS) { const rt = this.wrists[w]; this.airkit.level(w, this.gainFor(w, rt.live), 0.1); this.airkit.xfade(w, rt.liveSlot, 0.1); }
-    for (const w of WRISTS) {
-      const rt = this.wrists[w]; const live = slotsOf(w)[rt.liveSlot], free = slotsOf(w)[other(rt.liveSlot)];
-      this.airkit.params(live, rt.live.params); this.airkit.partner(live, this.partnerSlotFor(rt.live, scene));
-      this.airkit.params(free, {}); this.airkit.partner(free, null);
+    this.cueSeq++;                      // any cue still waiting for ready is superseded
+    this.auditionState = null; this.panicked = true;
+    this.airkit.panic(); this.log('PANIC: every wrist silenced', 'error'); this.changed();
+  }
+  async resume(): Promise<void> {
+    this.panicked = false;              // pushAll lands the model on the current scene
+    this.log('resume: re-pushing the current scene');
+    await this.pushAll();
+    this.airkit.level('audition', 1, 0.1);
+  }
+
+  get auditionWrist(): Wrist | null { return this.auditionState?.wrist ?? null; }
+  audition(wrist: Wrist, patch: string | null): void {
+    this.airkit.params(AUDITION_SLOT, {}); this.airkit.partner(AUDITION_SLOT, null);
+    if (patch) {
+      this.auditionState = { wrist, patch };
+      this.airkit.audition(wrist); this.load(AUDITION_SLOT, patch); this.airkit.level('audition', 1, 0.1);
+      this.log(`audition ${patch} on ${this.labelOf(wrist)} (slot ${AUDITION_SLOT})`);
+    } else {
+      this.auditionState = null;
+      this.airkit.audition(null); this.load(AUDITION_SLOT, 'silence');
+      this.log('audition off');
     }
-    for (const w of WRISTS) {
-      const rt = this.wrists[w];
-      this.airkit.load(slotsOf(w)[rt.liveSlot], rt.live.patch);
-      this.airkit.load(slotsOf(w)[other(rt.liveSlot)], 'silence');
-    }
-    this.preloadNext();
     this.changed();
+  }
+  // Rapid same-slot reload: silence then the live patch restarts it from scratch.
+  reloadWrist(w: Wrist): void {
+    const rt = this.wrists[w];
+    if (rt.fade || rt.loading) { this.log(`${this.labelOf(w)}: reload skipped — a transition is in flight`, 'warn'); return; }
+    const slot = slotsOf(w)[rt.liveSlot];
+    this.airkit.params(slot, rt.live.params); this.airkit.partner(slot, this.partnerSlotFor(rt.live, this.current));
+    this.load(slot, 'silence'); this.load(slot, rt.live.patch);
+    this.log(`${this.labelOf(w)}: reload ${rt.live.patch} on slot ${slot}`); this.changed();
+  }
+  setTrim(w: Wrist, db: number): void {
+    if (!Number.isFinite(db)) return;
+    this.trims[w] = Math.max(-60, Math.min(12, db));
+    this.airkit.level(w, this.gainFor(w, this.wrists[w].live), 0.1);
+    this.persist(); this.changed();
+  }
+  setMaster(db: number): void {
+    if (!Number.isFinite(db)) return;
+    this.masterDb = Math.max(-60, Math.min(12, db));
+    this.airkit.master(dbToGain(this.masterDb), 0.1);
+    this.persist(); this.changed();
+  }
+
+  // Keep the current scene by id (re-cue it if its sounds changed), else STANDBY; then preload the new next.
+  async replaceScenes(scenes: Scene[]): Promise<void> {
+    const curId = this.sceneIndex >= 0 ? this.current.id : null;
+    this.scenes = scenes;
+    const idx = curId === null ? STANDBY_INDEX : scenes.findIndex((s) => s.id === curId);
+    if (curId !== null && idx < 0) {
+      this.log(`scenes file changed: current scene ${curId} is gone — STANDBY`, 'warn');
+      await this.goTo(STANDBY_INDEX, 'scenes-file');
+      return;
+    }
+    this.sceneIndex = idx;
+    const target = this.sceneAt(idx);
+    const differs = WRISTS.some((w) => {
+      const live = this.wrists[w].live, want = target.sounds[w];
+      return !sameSound(live, want) || !sameParams(live.params, want.params) || live.level !== want.level;
+    });
+    if (differs) { this.log('scenes file changed: current scene differs — re-cueing it'); await this.goTo(idx, 'scenes-file'); }
+    else { this.log('scenes file reloaded'); this.preloadNext(); this.persist(); this.changed(); }
   }
 
   dispose(): void {
     this.airkit.off('online', this.onOnline);
+    this.airkit.off('seats', this.onSeats);
     this.cueSeq++;                      // a cue still waiting for ready returns 'superseded' and schedules nothing
     for (const w of WRISTS) { const rt = this.wrists[w]; if (rt.unloadTimer) clearTimeout(rt.unloadTimer); rt.unloadTimer = null; }
   }
