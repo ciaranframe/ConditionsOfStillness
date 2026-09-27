@@ -139,8 +139,14 @@ test('partner.guard: a 2H patch reading ~partner.env[\\model] unguarded fails; g
   const got = fix(unguarded, 'COS_Fixture2H').filter((i) => i.id === 'partner.guard');
   assert.equal(got.length, 2, got.map(formatIssue).join('\n'));
   quiet(fix(sub(BASE, idle, TWO_HAND_GUARDED), 'COS_Fixture2H'), 'partner.guard');
-  const nilDefault = sub(BASE, idle, '~idleNext = { |d, ctx|\n\tvar pm = ~partner.env !? { |e| e[\\model] };\n\tvar q = (~partner ?? { nil }) !? { ~partner.env[\\model] };\n};\n');
+  const nilDefault = sub(BASE, idle, '~idleNext = { |d, ctx|\n\tvar q = (~partner ?? { nil }) !? { ~partner.env[\\model] };\n};\n');
   quiet(fix(nilDefault, 'COS_Fixture2H'), 'partner.guard');
+});
+
+test('partner.guard: ~partner.env !? { … } alone is not a guard (it throws when ~partner is nil)', () => {
+  const idle = /~idleNext = \{[\s\S]*?\n\};\n/.exec(BASE)![0];
+  const envOnly = sub(BASE, idle, '~idleNext = { |d, ctx|\n\tvar pm = ~partner.env !? { |e| e[\\model] };\n};\n');
+  fires(fix(envOnly, 'COS_Fixture2H'), 'partner.guard', 'E');
 });
 
 test('style.compose: ~init that clobbers instead of composing', () => {
@@ -190,6 +196,19 @@ test('sample.manifest: a literal Buffer.read path fails; one built from cosSampl
   const env = fix(sub(BASE, INIT, INIT + '\tvar b = Buffer.readChannel(s, ~cosSamples +/+ "COS_Fixture/wav/hit.wav", channels: [0]);\n'));
   quiet(env, 'sample.manifest');
   fires(fix(sub(BASE, INIT, INIT + '\tvar b = Buffer.cueSoundFile(s, somePath, 0, 2);\n')), 'sample.manifest', 'E');
+});
+
+test('sample.manifest: a path traced one hop to cosSamples passes; one hop to a literal fails', () => {
+  const viaVar = fix(sub(atTop(BASE, 'var dir = ~cosSamples +/+ "COS_Fixture/wav";'), INIT, INIT + '\tvar b = Buffer.read(s, dir +/+ "hit.wav");\n'));
+  quiet(viaVar, 'sample.manifest');
+  const viaTop = fix(sub(atTop(BASE, 'var dir;'), INIT, INIT + '\tvar b;\n\tdir = topEnvironment[\\cosSamples] +/+ "COS_Fixture";\n\tb = Buffer.read(s, dir +/+ "hit.wav");\n'));
+  quiet(viaTop, 'sample.manifest');
+  const literalVar = fix(sub(atTop(BASE, 'var dir = "/Users/x";'), INIT, INIT + '\tvar b = Buffer.read(s, dir +/+ "hit.wav");\n'));
+  fires(literalVar, 'sample.manifest', 'E');
+  const literal = fix(sub(BASE, INIT, INIT + '\tvar b = Buffer.read(s, "hit.wav");\n'));
+  fires(literal, 'sample.manifest', 'E');
+  const later = fix(sub(sub(BASE, INIT, INIT + '\tvar b = Buffer.read(s, dir +/+ "hit.wav");\n'), '~onSceneParams = {', 'var dir = ~cosSamples;\n~onSceneParams = {'));
+  fires(later, 'sample.manifest', 'E'); // assigned only after the read
 });
 
 test('Review Focus 2: fixture file declaring samples: with a literal path fails via the CLI', () => {

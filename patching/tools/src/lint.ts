@@ -308,13 +308,18 @@ export function lintSource(name: string, src: string, opts: LintOptions = {}): I
     const deref = /~partner\s*(?:\.(?!\s*(?:notNil|isNil)\b)|\[)/.exec(code);
     if (deref) add('partner.guard', 'E', lineOf(code, deref.index), 'A one-hand patch dereferences ~partner — it is always nil outside a 2H load.');
   } else {
-    for (const m of code.matchAll(/~partner\s*\.\s*env\s*(?:\[|\.\s*at\s*\()\s*\\/g)) {
-      const after = codeSym.slice(m.index! + m[0].length - 1, m.index! + m[0].length + 8);
-      if (!/^\\model\b/.test(after)) continue;
+    // ~partner.env[\model], ~partner.env.at(\model), and ~partner.env !? { … } (which still
+    // throws when ~partner itself is nil) all need a guard on ~partner in the same statement.
+    // A read through the argument of ~partner !? { |p| p.env[\model] } never matches here.
+    for (const m of code.matchAll(/~partner\s*\.\s*env\s*(?:(?:\[|\.\s*at\s*\()\s*\\|!\?)/g)) {
+      if (!m[0].endsWith("!?")) {
+        const after = codeSym.slice(m.index! + m[0].length - 1, m.index! + m[0].length + 8);
+        if (!/^\\model\b/.test(after)) continue;
+      }
       const start = code.lastIndexOf(';', m.index!) + 1;
       const endAt = code.indexOf(';', m.index!);
       const stmt = code.slice(start, endAt < 0 ? code.length : endAt);
-      if (!/~partner\s*!\?\s*\{|~partner\s*\.\s*notNil\b|\?\?\s*\{|\.env\s*!\?/.test(stmt)) {
+      if (!/~partner\s*!\?\s*\{|~partner\s*\.\s*notNil\b|~partner\s*\?\?\s*\{/.test(stmt)) {
         add('partner.guard', 'E', lineOf(code, m.index!), 'Reads ~partner.env[\\model] without a nil guard — a tick can land before ~init sets ~partner (use ~partner !? { |p| ... } or if (~partner.notNil)).');
       }
     }
@@ -342,14 +347,31 @@ export function lintSource(name: string, src: string, opts: LintOptions = {}): I
     `No machine-specific path literals. Samples resolve from topEnvironment[\\${profile.samplesVar}].`);
 
   // --- samples: every Buffer.read*/cueSoundFile path is built from the samples root ---
+  // Traced one hop: the argument list mentions samplesVar itself, or names an identifier that was
+  // assigned (earlier in the file) from an expression mentioning samplesVar.
+  const samplesRe = new RegExp(`\\b${esc(profile.samplesVar)}\\b`);
+  const assigns: { name: string; at: number; fromSamples: boolean }[] = [];
+  for (const a of code.matchAll(/(?<![\w~.])([a-z_]\w*)\s*=(?!=)/g)) {
+    let depth = 0, j = a.index! + a[0].length;
+    for (; j < code.length; j++) {
+      const ch = code[j];
+      if (ch === "(" || ch === "[" || ch === "{") depth++;
+      else if (ch === ")" || ch === "]" || ch === "}") { if (depth === 0) break; depth--; }
+      else if ((ch === ";" || ch === ",") && depth === 0) break;
+    }
+    assigns.push({ name: a[1]!, at: a.index!, fromSamples: samplesRe.test(codeSym.slice(a.index! + a[0].length, j)) });
+  }
   for (const m of code.matchAll(/\bBuffer\s*\.\s*(read\w*|cueSoundFile)\s*\(/g)) {
     const open = m.index! + m[0].length - 1;
     const close = closeParen(code, open);
-    if (new RegExp(`\\b${esc(profile.samplesVar)}\\b`).test(codeSym.slice(open, close))) continue;
+    const args = codeSym.slice(open, close);
+    if (samplesRe.test(args)) continue;
+    const idents = new Set([...code.slice(open, close).matchAll(/(?<![\w~.\\])([a-z_]\w*)\b/g)].map((x) => x[1]!));
+    if (assigns.some((a) => a.at < m.index! && a.fromSamples && idents.has(a.name))) continue;
     const literal = /^\(\s*[^,]*,\s*"/.test(codeStr.slice(open, close));
     add('sample.manifest', 'E', lineOf(code, m.index!), literal
       ? `Buffer.${m[1]} with a literal path — load from topEnvironment[\\${profile.samplesVar}] +/+ "<Name>/wav/<slot>.wav" (samples/<Name>/manifest.json).`
-      : `Buffer.${m[1]} path must be built from topEnvironment[\\${profile.samplesVar}] (or ~${profile.samplesVar}) in the same expression.`);
+      : `Buffer.${m[1]} path must be built from topEnvironment[\\${profile.samplesVar}] (or ~${profile.samplesVar}) in the same expression or one assignment away.`);
   }
 
   // --- buses (Glimmer; both warn-only here) ---
