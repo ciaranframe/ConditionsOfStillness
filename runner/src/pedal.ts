@@ -59,25 +59,52 @@ export async function startPedal(opts: { cast: () => Cast; onCue: (a: PedalActio
   }
   let input: MidiInputLike | null = null; let portName: string | null = null; let timer: ReturnType<typeof setInterval> | null = null;
   let lastScanErrorAt = -Infinity;
+  const logScanError = (e: unknown) => {
+    const now = clock();
+    if (now - lastScanErrorAt >= SCAN_ERROR_LOG_MS) {
+      opts.log(`[pedal] scan failed: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}`);
+      lastScanErrorAt = now;
+    }
+  };
+  // Lists the current ports through a disposable probe Input. The probe is closed on every exit —
+  // the happy path closes it inline and clears the reference; the finally block is the safety net
+  // for a throw during listing (or from the close itself), so a flaky adapter never leaks a handle.
+  const listPorts = (): string[] | null => {
+    if (!Input) return null;
+    let probe: MidiInputLike | null = null;
+    try {
+      probe = new Input();
+      const inst = probe; const names = Array.from({ length: inst.getPortCount() }, (_, i) => inst.getPortName(i));
+      inst.closePort(); probe = null;
+      return names;
+    } catch (e) { logScanError(e); return null; }
+    finally { if (probe) { try { probe.closePort(); } catch { /* already gone */ } } }
+  };
   // The native binding can throw at any of these calls (unplug mid-call, a flaky adapter's driver, …);
-  // the pedal is optional, so a scan failure must never take the whole runner down with it.
+  // the pedal is optional, so a scan failure must never take the whole runner down with it. A failure
+  // that is only in listing ports leaves an already-open `input` alone; only a failure while opening a
+  // new port (or wiring its message handler) closes and drops it.
   const scan = () => {
     if (!Input) return;
+    const names = listPorts();
+    if (names === null) return;               // couldn't list this tick; already logged, input untouched
+    if (input) {
+      if (!names.includes(portName!)) {
+        opts.log(`[pedal] "${portName}" disappeared`);
+        try { input.closePort(); } catch { /* already gone */ }
+        input = null; portName = null;
+      }
+      return;
+    }
+    const want = opts.cast().pedal.input?.toLowerCase() ?? null;
+    const idx = want ? names.findIndex((n) => n.toLowerCase().includes(want)) : names.length ? 0 : -1;
+    if (idx < 0) return;
     try {
-      const probe = new Input(); const names = Array.from({ length: probe.getPortCount() }, (_, i) => probe.getPortName(i)); probe.closePort();
-      if (input) { if (!names.includes(portName!)) { opts.log(`[pedal] "${portName}" disappeared`); input.closePort(); input = null; portName = null; } return; }
-      const want = opts.cast().pedal.input?.toLowerCase() ?? null;
-      const idx = want ? names.findIndex((n) => n.toLowerCase().includes(want)) : names.length ? 0 : -1;
-      if (idx < 0) return;
       input = new Input(); input.ignoreTypes(true, true, true);
       input.on('message', (_dt, msg) => { const d = mapper.feed(msg); if (d) opts.log(`[pedal] ${d}`); });
       input.openPort(idx); portName = names[idx]!; opts.log(`[pedal] listening on "${portName}"`);
     } catch (e) {
-      const now = clock();
-      if (now - lastScanErrorAt >= SCAN_ERROR_LOG_MS) {
-        opts.log(`[pedal] scan failed: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}`);
-        lastScanErrorAt = now;
-      }
+      logScanError(e);
       if (input) { try { input.closePort(); } catch { /* already gone */ } }
       input = null; portName = null;
     }

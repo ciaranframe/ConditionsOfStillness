@@ -35,15 +35,23 @@ test('mapper fires next/back, debounces 150 ms per action, honours the channel f
   assert.equal(m.lastEvent?.desc.includes('note 61'), true);
 });
 
-test('scan() survives a native MIDI exception, recovers on the next tick, and close() tolerates closePort throwing later — injectable Input needs no hardware', async (t) => {
+test('scan() survives a native MIDI exception, recovers on the next tick, closes every probe it constructs, and a later probe-only failure does not disturb an open port — injectable Input needs no hardware', async (t) => {
   let getPortCountCalls = 0;
-  let closePortCalls = 0;
+  let throwNextPortCount = false;
   let messageCb: ((dt: number, msg: number[]) => void) | null = null;
+  const instances: FakeInput[] = [];    // every probe/input this test constructs, so none may be left open
   class FakeInput implements MidiInputLike {
-    getPortCount() { getPortCountCalls++; if (getPortCountCalls === 1) throw new Error('native boom'); return 1; }
+    closed = false;
+    constructor() { instances.push(this); }
+    getPortCount() {
+      getPortCountCalls++;
+      if (getPortCountCalls === 1) throw new Error('native boom');           // first tick: the probe itself fails
+      if (throwNextPortCount) { throwNextPortCount = false; throw new Error('native boom 2'); } // a later, one-off probe failure
+      return 1;
+    }
     getPortName(_i: number) { return 'Pedal'; }
     openPort(_i: number) {}
-    closePort() { closePortCalls++; }
+    closePort() { this.closed = true; }
     ignoreTypes() {}
     on(ev: 'message', cb: (dt: number, msg: number[]) => void) { if (ev === 'message') messageCb = cb; }
   }
@@ -52,13 +60,23 @@ test('scan() survives a native MIDI exception, recovers on the next tick, and cl
   const logs: string[] = [];
   const p = await startPedal({ cast: () => cast, onCue: (a) => cues.push(a), log: (m) => logs.push(m), midi: { Input: FakeInput }, rescanMs: 20 });
   t.after(() => p.close());
-  // First scan (synchronous, inside startPedal) hit the thrown getPortCount and was swallowed.
+  // First scan (synchronous, inside startPedal) hit the thrown getPortCount and was swallowed; its
+  // probe must still have been closed — no leaked native handle from the failing tick.
   assert.equal(p.status().state, 'NO PEDAL');
   assert.equal(logs.some((l) => l.includes('scan failed: native boom')), true);
+  assert.equal(instances.length > 0, true);
+  assert.equal(instances.every((i) => i.closed), true);
   await sleep(60);
-  assert.deepEqual(p.status(), { state: 'OK', port: 'Pedal', lastEvent: null });
+  const opened = p.status();
+  assert.deepEqual(opened, { state: 'OK', port: 'Pedal', lastEvent: null });
   messageCb!(0, [0x90, 60, 100]);
   assert.deepEqual(cues, ['next']);
+  // A probe-only failure on a later tick (listing ports for the disappearance check) must not
+  // touch the already-open input: status stays OK on the same port.
+  throwNextPortCount = true;
+  await sleep(40);
+  assert.equal(p.status().state, 'OK');
+  assert.equal(p.status().port, 'Pedal');
   p.close();
-  assert.equal(closePortCalls > 0, true);
+  assert.equal(instances.every((i) => i.closed), true);
 });
