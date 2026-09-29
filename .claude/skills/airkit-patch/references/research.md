@@ -64,6 +64,12 @@ Tanaka; Fels on transparency), wearable/wrist-IMU instruments (AirSticks, Mi.Mu)
 comparable instruments map accelerometer and orientation data. Return a mapping table proposal.
 
 **E — SuperCollider practice.** Which UGens and structures realise the design within budget.
+**A subagent that measures CPU must never touch the live engine**: it must create its own server on
+a private port *and* make it the default before any `SynthDef`, `Synth` or free —
+`s = Server(\bench, NetAddr("127.0.0.1", 57200)); Server.default = s; s.bootSync;` — and end with
+`s.quit`. Never `Server.killAll`, never `freeAll` on a server it did not boot. (2026-09-29: a
+benchmark that skipped `Server.default = s` sent its synths and its frees to the engine's scsynth on
+57110 and silenced every patch until the engine was restarted.)
 For each candidate UGen: the real signature and ranges from the **local** help
 (`~/Library/Application Support/SuperCollider/Help/Classes/<Name>.html`, or the class source in
 `/Applications/SuperCollider.app/Contents/Resources/SCClassLibrary` and

@@ -1,0 +1,26 @@
+{
+  "wails": {
+    "file": "wav/wails.wav",
+    "frames": 5113345,
+    "channels": 1,
+    "sr": 48000,
+    "source": "wails-Discrete_wails_and_screams.wav",
+    "seconds": 106.528021
+  },
+  "high": {
+    "file": "wav/high.wav",
+    "frames": 694272,
+    "channels": 1,
+    "sr": 48000,
+    "source": "high-High_stretched_female_scream.flac",
+    "seconds": 14.464
+  },
+  "low": {
+    "file": "wav/low.wav",
+    "frames": 1465344,
+    "channels": 1,
+    "sr": 48000,
+    "source": "low-Low_stretched_male_scream.flac",
+    "seconds": 30.528
+  }
+}
