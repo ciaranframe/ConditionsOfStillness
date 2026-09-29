@@ -1,31 +1,26 @@
 # Conditions of Stillness — cue list. Spec §6. Ids mirror the PatchMarks letters by convention.
 # A wrist not mentioned keeps its sound. Z / C assign a two-hand (2H) sound to a performer.
-# Only COS_Template and silence exist until sub-project 4 writes patches.
+# Patches: COS_Precipice (the intro hum, locked 2026-09-29), COS_Precipice2 (the next stage, locked 2026-09-29).
 piece: Conditions of Stillness
 defaults: { fade: 2.0, level: 0 }        # level in dB
 scenes:
   - id: A
-    name: Opening stillness
-    fade: 6.0
-    sounds:
-      ZL: { patch: COS_Template, params: { register: low } }
-      ZR: COS_Template
-      CR: { patch: COS_Template, level: -6 }
-  - id: B
-    name: First strike
-    fade: 0.1
-    sounds:
-      ZR: { patch: COS_Template, params: { register: high } }
-      CL: COS_Template
-  - id: C
-    name: Held breath
-    fade: 4.0
+    name: Standby, all silent
     sounds:
       ZL: silence
+      ZR: silence
       CL: silence
       CR: silence
-  - id: D
-    name: Stillness II
-    fade: 10.0
+  - id: B
+    name: Precipice — right hands
     sounds:
-      ZR: silence
+      ZR: COS_Precipice
+      CR: COS_Precipice
+      ZL: silence
+      CL: silence
+  - id: C
+    name: Precipice 2 — right hands
+    fade: 0.5
+    sounds:
+      ZR: COS_Precipice2
+      CR: COS_Precipice2
