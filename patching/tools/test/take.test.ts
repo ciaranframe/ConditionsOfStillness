@@ -125,7 +125,7 @@ test('no packet within the warning window: warns once, naming the address, the p
   const result = await handle.done;
   assert.equal(result.written, false);
   assert.equal(warnings.length, 1);
-  assert.equal(warnings[0], `waiting for /3/IMUFusedData on udp ${handle.port} — is the stick streaming here? (repoint with /Config/RequestStream, or stop the runner)`);
+  assert.equal(warnings[0], `waiting for /3/IMUFusedData on udp ${handle.port} — is the stick streaming here? (AirKit sticks: repoint with /Config/RequestStream, or stop the runner; the Glimmer C-stick build sends to a fixed address on 9000)`);
 });
 
 test('packets arriving before the warning window: no warning', async () => {

@@ -14,6 +14,7 @@
     "patch:roster": "node patching/tools/patch-roster.ts",
     "corpus:mine": "node patching/tools/corpus-mine.ts",
     "take:record": "node patching/tools/take-record.ts",
+    "take:page": "node patching/tools/take-page.ts",
     "samples:check": "node patching/tools/samples-check.ts"
   }
 }

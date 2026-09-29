@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Conditions — Takes</title>
+<link rel="stylesheet" href="fonts.css">
+<style>
+/* Cockpit, not craft: black ground, white type, colour = status only (same tokens as the runner pages). */
+:root {
+  --ok: #2fbf6b; --warn: #f0b429; --bad: #e5484d; --grey: #5a5a5a;
+  --muted: #b8b8b8; --dim: #8a8a8a; --surface: #0e0e0e; --raised: #1a1a1a; --border: #3a3a3a; --faint: #2a2a2a;
+  --sans: 'IBM Plex Sans', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #000; color: #fff; }
+body { font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+#app { min-height: 100vh; display: flex; flex-direction: column; gap: 12px; padding: 14px; }
+.mono { font-family: var(--mono); }
+.dim { color: var(--dim); }
+.label { font-family: var(--mono); letter-spacing: 0.14em; color: var(--muted); font-size: 12px; text-transform: uppercase; }
+.panel { background: var(--surface); border: 2px solid var(--border); border-radius: 4px; min-width: 0; }
+
+/* strip */
+.strip { display: grid; grid-template-columns: 1fr 2fr 1fr 1fr; gap: 8px; }
+.cell { padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+.cell .v { font-family: var(--mono); font-size: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cell .s { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+.cell.ok { border-color: var(--ok); }
+.cell.bad { border-color: var(--bad); }
+.bar { height: 8px; background: var(--faint); border-radius: 2px; overflow: hidden; margin-top: 6px; }
+.bar > i { display: block; height: 100%; width: 0; background: #fff; transition: width 80ms linear; }
+
+/* main */
+.main { flex: 1; display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 12px; min-height: 0; }
+.box { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.list { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.row { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: baseline; padding: 6px 8px; border-radius: 3px; border: 1px solid transparent; cursor: pointer; font-size: 14px; }
+.row:hover { border-color: var(--border); }
+.row.armed { border-color: var(--warn); }
+.row.done { color: var(--dim); }
+.row .k { font-family: var(--mono); white-space: nowrap; }
+.row .k::before { content: '○ '; color: var(--grey); }
+.row.done .k::before { content: '● '; color: var(--ok); }
+.row .w { color: var(--muted); }
+.trow { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; padding: 6px 8px; font-size: 13px; border-bottom: 1px solid var(--faint); }
+.trow .k { font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trow .w { color: var(--dim); grid-column: 1 / -1; font-size: 12px; }
+
+/* state */
+.state { align-items: stretch; }
+.big { flex: none; height: 150px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border-radius: 4px; border: 2px solid var(--border); font-family: var(--mono); }
+.big .word { font-size: 44px; letter-spacing: 0.14em; font-weight: 600; }
+.big .sub { font-size: 14px; color: var(--muted); }
+.big.rec { border-color: var(--bad); background: #2a0d0e; }
+.big.rec .word { color: var(--bad); }
+.big.armed { border-color: var(--warn); }
+.form { display: grid; grid-template-columns: 70px 1fr; gap: 8px 10px; align-items: center; }
+input, select { font-family: var(--mono); font-size: 15px; color: #fff; background: var(--raised); border: 1px solid var(--border); border-radius: 3px; padding: 8px 10px; width: 100%; }
+input:focus, select:focus { outline: none; border-color: #fff; }
+.buttons { display: flex; gap: 10px; }
+button { font-family: var(--mono); font-size: 18px; letter-spacing: 0.1em; font-weight: 700; flex: 1; height: 64px; border-radius: 4px; border: 2px solid var(--border); background: var(--raised); color: #fff; cursor: pointer; }
+button:disabled { opacity: 0.35; cursor: default; }
+.btn-rec { background: #fff; border-color: #fff; color: #000; }
+.btn-stop { background: var(--bad); border-color: var(--bad); color: #000; }
+.msg { font-family: var(--mono); font-size: 12px; min-height: 16px; color: var(--muted); }
+.msg.bad { color: var(--bad); }
+.hint { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="strip">
+    <div class="panel cell" id="c-listen"><div class="label">Listening</div><div class="v" id="v-listen">—</div><div class="s" id="s-listen"></div></div>
+    <div class="panel cell" id="c-stick"><div class="label">Stick</div><div class="v" id="v-stick">no stick heard</div><div class="s" id="s-stick"></div></div>
+    <div class="panel cell" id="c-a"><div class="label">|a| m/s²</div><div class="v" id="v-a">—</div><div class="bar"><i id="bar-a"></i></div></div>
+    <div class="panel cell" id="c-as"><div class="label">Filed as</div><div class="v" id="v-as">—</div><div class="s" id="s-as"></div></div>
+  </div>
+  <div class="main">
+    <div class="panel box">
+      <div class="label">Plan <span class="dim" id="plan-count"></span></div>
+      <div class="list" id="plan"></div>
+      <div class="hint" id="plan-path"></div>
+    </div>
+    <div class="panel box state">
+      <div class="big" id="big"><div class="word" id="word">STANDBY</div><div class="sub" id="sub">&nbsp;</div></div>
+      <div class="form">
+        <div class="label">label</div><input id="label" autocomplete="off" spellcheck="false" placeholder="A-still">
+        <div class="label">what</div><input id="what" autocomplete="off" placeholder="what the wrist is doing">
+        <div class="label">stick</div><select id="stick"></select>
+        <div class="label">wrist</div><select id="wrist"><option value="">— (file as CF)</option><option>ZL</option><option>ZR</option><option>CL</option><option>CR</option></select>
+      </div>
+      <div class="buttons"><button class="btn-rec" id="rec">RECORD</button><button class="btn-stop" id="stop" disabled>STOP</button></div>
+      <div class="msg" id="msg"></div>
+      <div class="hint">space = record / stop · click a plan row to arm it · a label already taken needs ⌥-click RECORD to replace</div>
+    </div>
+    <div class="panel box">
+      <div class="label">Takes <span class="dim" id="takes-count"></span></div>
+      <div class="list" id="takes"></div>
+    </div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+let state = null, armed = null, offline = false, lastSeenLabel = null;
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const fmt = (s) => { s = Math.max(0, Math.floor(s)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+
+function setMsg(text, bad) { $('msg').textContent = text || ''; $('msg').className = 'msg' + (bad ? ' bad' : ''); }
+
+function render() {
+  if (!state) return;
+  const rec = state.recording;
+  // strip
+  $('v-listen').textContent = offline ? 'PAGE OFFLINE' : `udp ${state.udpPort}`;
+  $('s-listen').textContent = offline ? 'take-page.ts not answering' : `${state.heard.length} stick${state.heard.length === 1 ? '' : 's'} heard`;
+  $('c-listen').className = 'panel cell' + (offline ? ' bad' : '');
+  const sel = $('stick');
+  const chosen = sel.value || (state.heard[0] && state.heard[0].id) || '';
+  const ids = state.heard.map((h) => h.id);
+  if (sel.options.length !== ids.length || ids.some((id, i) => sel.options[i].value !== id)) {
+    sel.innerHTML = ids.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('');
+  }
+  if (chosen && ids.includes(chosen)) sel.value = chosen;
+  const h = state.heard.find((x) => x.id === sel.value) || state.heard[0];
+  if (h) {
+    $('v-stick').textContent = `${h.id}  ${h.ip}`;
+    $('s-stick').textContent = `${h.rateHz} Hz · ${h.batteryPct == null ? 'batt —' : h.batteryPct + '%'}${h.volts != null ? ' ' + h.volts.toFixed(2) + ' V' : ''} · ${h.packets} pkts`;
+    $('c-stick').className = 'panel cell ' + (h.alive ? 'ok' : 'bad');
+    $('v-a').textContent = h.mag == null ? '—' : h.mag.toFixed(2);
+    $('bar-a').style.width = `${Math.min(100, (h.mag || 0) / 30 * 100)}%`;
+  } else {
+    $('v-stick').textContent = 'no stick heard';
+    $('s-stick').textContent = `stream the stick to this Mac on udp ${state.udpPort}`;
+    $('c-stick').className = 'panel cell';
+    $('v-a').textContent = '—'; $('bar-a').style.width = '0';
+  }
+  const wrist = $('wrist').value;
+  $('v-as').textContent = wrist || state.as;
+  $('s-as').textContent = wrist ? 'a performer wrist' : 'general filing (not a performer wrist)';
+  // big state
+  const big = $('big');
+  if (rec) {
+    big.className = 'big rec'; $('word').textContent = `REC ${fmt(rec.elapsedSec)}`;
+    $('sub').textContent = `${rec.label} · ${rec.rows} rows · ${rec.id} as ${rec.as}`;
+  } else if ($('label').value) {
+    big.className = 'big armed'; $('word').textContent = 'ARMED'; $('sub').textContent = $('label').value;
+  } else {
+    big.className = 'big'; $('word').textContent = 'STANDBY'; $('sub').textContent = state.last ? `last: ${state.last.label} ${state.last.written ? state.last.rows + ' rows' : 'nothing written'}` : ' ';
+  }
+  $('rec').disabled = !!rec || offline;
+  $('stop').disabled = !rec || offline;
+  for (const id of ['label', 'what', 'stick', 'wrist']) $(id).disabled = !!rec;
+  // last result → message
+  if (state.last && state.last.label !== lastSeenLabel) {
+    lastSeenLabel = state.last.label;
+    if (state.last.written) setMsg(`${state.last.label}: ${state.last.rows} rows, ${state.last.hz} Hz (${state.last.reason})`);
+    else setMsg(`${state.last.label}: no packets from the stick — nothing written`, true);
+  }
+  // plan
+  const planEl = $('plan');
+  $('plan-count').textContent = state.plan.length ? `${state.plan.filter((p) => p.done).length} / ${state.plan.length}` : '';
+  $('plan-path').textContent = state.plan.length ? state.planPath : `no plan yet — write ${state.planPath} (| label | what |)`;
+  planEl.innerHTML = state.plan.map((p, i) => `<div class="row${p.done ? ' done' : ''}${armed === p.label ? ' armed' : ''}" data-i="${i}"><span class="k">${esc(p.label)}</span><span class="w">${esc(p.what)}</span></div>`).join('');
+  // takes
+  $('takes-count').textContent = state.takes.length ? String(state.takes.length) : '';
+  $('takes').innerHTML = state.takes.map((t) => `<div class="trow"><span class="k">${esc(t.label)}</span><span class="mono dim">${esc(t.wrist)}</span><span class="mono dim">${esc(t.seconds)} s</span>${t.what ? `<span class="w">${esc(t.what)}</span>` : ''}</div>`).join('');
+}
+
+function arm(p) {
+  armed = p.label; $('label').value = p.label; $('what').value = p.what; render();
+}
+$('plan').addEventListener('click', (e) => {
+  const row = e.target.closest('.row'); if (!row || state.recording) return;
+  arm(state.plan[Number(row.dataset.i)]);
+});
+
+async function api(path, body) {
+  const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+async function record(force) {
+  const label = $('label').value.trim(), what = $('what').value.trim(), id = $('stick').value, wrist = $('wrist').value;
+  if (!label) return setMsg('type a label (or click a plan row)', true);
+  if (!id) return setMsg('no stick heard yet', true);
+  try { await api('/api/record', { label, what, id, wrist: wrist || undefined, force: !!force }); setMsg(''); }
+  catch (e) { setMsg(e.message, true); }
+  poll();
+}
+async function stop() {
+  try {
+    const j = await api('/api/stop');
+    if (j.result && j.result.written) {
+      // arm the next undone plan item
+      const next = state.plan.find((p) => !p.done && p.label !== j.result.label);
+      $('label').value = ''; $('what').value = ''; armed = null;
+      if (next) arm(next);
+    }
+  } catch (e) { setMsg(e.message, true); }
+  poll();
+}
+$('rec').addEventListener('click', (e) => record(e.altKey));
+$('stop').addEventListener('click', stop);
+document.addEventListener('keydown', (e) => {
+  if (e.code !== 'Space' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  e.preventDefault();
+  if (state && state.recording) stop(); else record(e.altKey);
+});
+$('label').addEventListener('input', () => { armed = null; render(); });
+$('wrist').addEventListener('change', render);
+$('stick').addEventListener('change', render);
+
+async function poll() {
+  try {
+    const r = await fetch('/api/state', { cache: 'no-store' });
+    state = await r.json(); offline = false;
+  } catch { offline = true; }
+  render();
+}
+poll();
+setInterval(poll, 200);
+</script>
+</body>
+</html>
