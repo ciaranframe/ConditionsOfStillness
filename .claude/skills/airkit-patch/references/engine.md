@@ -100,7 +100,7 @@ change — a half-written file is interpreted, so every write is temp-then-renam
 `~deinit = ~deinit <> { … }`; release long-lived synths with `.set(\gate, 0)`, never `.free`;
 capture refs and nil the vars first so a double fire is a no-op, as the template does:
 `var sy = synth;` (airkit/personalities/COS_Template.sc:74); **silent within ~200 ms of `~deinit`** (the audition
-checks silence within 1 s of the unload); buffers freed last, after release tails.
+checks silence within 1 s of the unload, on the meter's **rms** — its peak has a 3 s display lag, `SendPeakRMS.kr(sig, 10, 3` (airkit/code3.0/conditions/main_conditions.scd:89)); buffers freed last, after release tails.
 
 ## 4. The tick
 

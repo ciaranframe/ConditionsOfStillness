@@ -146,7 +146,7 @@ test('levels that stay up after the unload fail the silence check', async () => 
   const fake = await fakeAirkit();
   const srcPort = await freePort();
   try {
-    fake.levels[8] = 0.3;   // never lowered: the "patch" keeps sounding after silence is loaded
+    fake.levels[8] = 0.3; fake.levels[9] = 0.1;   // never lowered: the "patch" keeps sounding after silence is loaded
     const result = await runAudition({
       host: '127.0.0.1', port: fake.port, srcPort, patch: 'COS_Template', phases: [quickPhases()[1]!], log: () => {},
     });

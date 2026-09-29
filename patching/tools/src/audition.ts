@@ -284,9 +284,12 @@ export async function runAudition(opts: AuditionOptions): Promise<AuditionResult
   // into peak/rms, and those after the grace into peakSettled.
   type Acc = { peak: number; rms: number; samples: number; peakSettled: number; settledSamples: number; since: number };
   let current: Acc | null = null;
-  let lastAuditionPeak: { value: number; at: number } | null = null;
+  // The engine's audition meter is SendPeakRMS with a 3 s peakLag (a VU-style display decay), so
+  // its *peak* cannot fall 30 dB in a second however fast the patch stops; its *rms* is computed
+  // per reply window with no lag. The silence check therefore judges the rms.
+  let lastAuditionRms: { value: number; at: number } | null = null;
   link.onLevels((f) => {
-    lastAuditionPeak = { value: f[8]!, at: now() };
+    lastAuditionRms = { value: f[9]!, at: now() };
     if (!current) return;
     current.peak = Math.max(current.peak, f[8]!);
     current.rms = Math.max(current.rms, f[9]!);
@@ -413,13 +416,14 @@ export async function runAudition(opts: AuditionOptions): Promise<AuditionResult
     unloaded = true;
     if (!pollTimer) { pollTimer = setInterval(() => { void link.getStatus(t.askMs); }, t.pollMs); pollTimer.unref(); }
     // silent = a levels message at least 150 ms after the unload (fresh audio, not the max-hold of
-    // what played before it) with peak < 0.01, all within silenceMs.
+    // what played before it) with rms < 0.01 (−40 dBFS), all within silenceMs. rms, not peak: the
+    // engine's peak meter has a 3 s display lag (see the levels listener above).
     while (now() - unloadAt < t.silenceMs) {
       await sleep(25);
-      const lp = lastAuditionPeak as { value: number; at: number } | null;
+      const lp = lastAuditionRms as { value: number; at: number } | null;
       if (lp && lp.at - unloadAt >= 150 && lp.value < 0.01) { result.silenced = true; break; }
     }
-    if (!result.silenced) log(`[audition] audition peak did not fall below -40 dBFS within ${t.silenceMs} ms of loading silence`);
+    if (!result.silenced) log(`[audition] audition rms did not fall below -40 dBFS within ${t.silenceMs} ms of loading silence`);
     const s = await link.getSeats(t.askMs);
     if (s?.[devicePort] !== 'silence') { result.silenced = false; log(`[audition] port ${devicePort} is on ${s?.[devicePort] ?? '?'}, not silence`); }
     link.send('/airkit/cos/level', ['audition', 1, 0.1], 'sff');
