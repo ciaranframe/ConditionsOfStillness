@@ -19,6 +19,8 @@ path + rename, so a half-written file is never observable). `src/sc.ts` — `SCL
 `airkitRoot`, `personalityPath`, `rosterPath`, `compileCheck` (the compile check `patch-compile.ts`
 runs; the idiom is Glimmer's `tools/patch-compile.sh`).
 
+Takes recorded here are also replayed live from Admin's REPLAY TAKE panel (`runner/src/replay.ts`: the same `takes/INDEX.md`, rows into a wrist's slots as if its stick sent them).
+
 Future work: `patch-audition.ts --partner-slot <n>` — audition a `2H` patch with `~partner` set
 to a live slot's model instead of nil (today the tool always sends `partner 9 0`, so the partner
 branch is checked with Ciaran live).

@@ -19,6 +19,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { flattenPacket } from '../../../scripts/lib/osc.ts';
 import { WRISTS, type Wrist } from '../../../runner/src/scenes.ts';
+import { parseTakeIndex } from '../../../runner/src/replay.ts';
 import { repoRoot } from './sc.ts';
 import { LABEL_RE, startTakeSession, takePath, type TakeResult, type TakeSession } from './take.ts';
 
@@ -83,20 +84,8 @@ export function parsePlan(text: string): Array<{ label: string; what: string }> 
   return out;
 }
 
-/** Parses `takes/INDEX.md` rows (the five-column table take.ts appends to). Pure. */
-export function parseIndex(text: string): TakeRow[] {
-  const out: TakeRow[] = [];
-  for (const raw of text.split('\n')) {
-    const line = raw.trim();
-    if (!line.startsWith('|')) continue;
-    const cells = line.split('|').slice(1, -1).map((c) => c.trim());
-    if (cells.length < 5) continue;
-    const label = cells[0]!;
-    if (label === 'label' || /^:?-+:?$/.test(label)) continue;
-    out.push({ label, wrist: cells[1]!, date: cells[2]!, seconds: cells[3]!, what: cells[4]! });
-  }
-  return out;
-}
+/** `takes/INDEX.md` rows — the runner's parser (runner/src/replay.ts), re-exported for the page. */
+export const parseIndex = (text: string): TakeRow[] => parseTakeIndex(text);
 
 function readJson(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {

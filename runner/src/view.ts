@@ -7,6 +7,7 @@ import type { StickIngest, HeardStick } from './sticks.ts';
 import { BATTERY_LOW_PCT } from './sticks.ts';
 import type { AirkitLink } from './airkit.ts';
 import type { PedalStatus } from './pedal.ts';
+import type { Replay, ReplayState, TakeInfo } from './replay.ts';
 import { whoOf, type Cast } from './cast.ts';
 import { monotonicMs } from './clock.ts';
 
@@ -23,8 +24,9 @@ export interface View {
   slots: Array<{ slot: number; stick: string; name: string; tickAgeMs: number; ready: boolean; live: boolean }>;
   pedal: PedalStatus; heard: HeardStick[]; audition: { wrist: Wrist; patch: string } | null; lastCue: LastCue | null;
   scenesError: string | null; castError: string | null; masterDb: number; masterPeak: number; roster: string[];
+  replay: ReplayState | null; takes: TakeInfo[];
 }
-export interface ViewDeps { show: Show; sticks: StickIngest; airkit: AirkitLink; pedal: () => PedalStatus; castError: () => string | null; clock?: () => number }
+export interface ViewDeps { show: Show; sticks: StickIngest; airkit: AirkitLink; replay?: Replay; pedal: () => PedalStatus; castError: () => string | null; clock?: () => number }
 
 const LEVELS_FRESH_MS = 1500;
 const BATTERY_BAD_PCT = 10;
@@ -65,22 +67,25 @@ export function buildView(d: ViewDeps): View {
   const levels = airkit.levels;
   const levelsAgeMs = levels ? Math.max(0, Math.round(now - levels.at)) : null;
 
+  const replayed = (w: Wrist) => !!d.replay?.active(w);   // a replayed take stands in for the stick
   const wrists = {} as Record<Wrist, WristView>;
   for (const w of WRISTS) {
     const rt = show.wrists[w], sig = signals[w];
-    const state: WristState = show.panicked ? 'PANIC' : !sig.alive ? 'NO SIGNAL' : rt.loading ? 'LOADING' : rt.fade ? 'FADING' : rt.live.patch === 'silence' ? 'SILENT' : 'OK';
+    const alive = sig.alive || replayed(w);
+    const state: WristState = show.panicked ? 'PANIC' : !alive ? 'NO SIGNAL' : rt.loading ? 'LOADING' : rt.fade ? 'FADING' : rt.live.patch === 'silence' ? 'SILENT' : 'OK';
     const liveSlot = slotsOf(w)[rt.liveSlot];
     const standbyPatch = rt.standby?.patch ?? null;
     const detail = [
       ...Object.entries(rt.live.params).map(([k, v]) => `${k}=${v}`),
       `slot ${liveSlot} live`,
+      ...(replayed(w) ? [`replay ${d.replay!.state()!.label}`] : []),
       ...(standbyPatch && !rt.fade ? [`preload ${standbyPatch}`] : []),   // while fading, standby is the outgoing sound
     ];
     const lv = levels?.[w];
     wrists[w] = {
       wrist: w, label: sig.label, who: whoOf(w),
       patch: rt.fade ? rt.fade.from.patch : rt.live.patch, incoming: rt.fade ? rt.live.patch : null,
-      state, fadePct: show.fadeProgress(w), alive: sig.alive, ageMs: finiteOr(sig.ageMs, -1), battery: sig.batteryPct, ipMismatch: sig.ipMismatch,
+      state, fadePct: show.fadeProgress(w), alive, ageMs: replayed(w) ? 0 : finiteOr(sig.ageMs, -1), battery: sig.batteryPct, ipMismatch: sig.ipMismatch,
       levelDb: rt.live.level, trimDb: show.trims[w], liveSlot, standbyPatch,
       peak: lv?.[0] ?? 0, rms: lv?.[1] ?? 0, detail: detail.join(' · '),
     };
@@ -89,7 +94,7 @@ export function buildView(d: ViewDeps): View {
   const cells: StatusCell[] = [];
   const pedal = d.pedal();
   cells.push({ key: 'PEDAL', value: pedal.state, tone: pedal.state === 'OK' ? 'ok' : 'warn' });
-  const alive = WRISTS.filter((w) => signals[w].alive).length;
+  const alive = WRISTS.filter((w) => signals[w].alive || replayed(w)).length;
   cells.push({ key: 'STICKS', value: `${alive} / 4`, tone: alive === 4 ? 'ok' : alive > 0 ? 'warn' : 'bad' });
   cells.push({ key: 'AIRKIT', value: online ? 'OK' : 'OFFLINE', tone: online ? 'ok' : 'bad' });
   if (!online) cells.push({ key: 'AUDIO', value: 'OFFLINE', tone: 'bad' });
@@ -126,5 +131,6 @@ export function buildView(d: ViewDeps): View {
     engine: { online, cpu: status?.serverCpu ?? 0, limiterOn: !!status?.limiterOn, deviceCount: status?.deviceCount ?? 0, host: airkit.host, port: airkit.port, levelsAgeMs },
     slots, pedal, heard: sticks.heard(), audition: show.auditionState, lastCue: show.lastCue,
     scenesError: show.scenesError, castError: d.castError(), masterDb: show.masterDb, masterPeak: levels?.master[0] ?? 0, roster: airkit.roster,
+    replay: d.replay?.state() ?? null, takes: d.replay?.list() ?? [],
   };
 }

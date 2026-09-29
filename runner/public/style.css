@@ -281,4 +281,12 @@ body.admin .end-buttons { flex: none; margin-top: auto; display: flex; gap: calc
 body.admin .end-buttons .btn { flex: 1 1 0; min-width: 0; height: calc(56 * var(--u)); font-size: calc(13 * var(--u)); text-align: center; line-height: 1.1; padding: 0 calc(4 * var(--u)); }
 body.admin .end-buttons .btn-bad, body.admin .end-buttons .btn-panic { font-size: calc(16 * var(--u)); }
 body.admin .end-buttons .btn-panic.armed { font-size: calc(12 * var(--u)); }
+body.admin .replay { flex: none; }
+body.admin .replay .label { white-space: nowrap; }
+body.admin .replay .box-head { gap: calc(8 * var(--u)); }
+body.admin .replay-row { display: flex; align-items: center; gap: calc(6 * var(--u)); min-width: 0; }
+body.admin .replay-row select { flex: 1; min-width: 0; }
+body.admin .replay-loop { flex: none; display: flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: calc(11 * var(--u)); color: var(--muted); }
+body.admin .replay-row .btn { flex: none; width: calc(64 * var(--u)); height: calc(30 * var(--u)); font-size: calc(12 * var(--u)); }
+body.admin .replay-now { font-family: var(--mono); font-size: calc(11 * var(--u)); color: var(--warn); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 body.admin .empty { font-family: var(--mono); font-size: calc(11 * var(--u)); color: var(--dim); }

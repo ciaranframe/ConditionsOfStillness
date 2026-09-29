@@ -21,7 +21,8 @@ import type { Log, LogLine } from './log.ts';
 export type Command =
   | { type: 'cue'; action: 'next' | 'back' } | { type: 'jump'; index: number } | { type: 'trim'; wrist: Wrist; db: number } | { type: 'master'; db: number }
   | { type: 'panic' } | { type: 'resume' } | { type: 'audition'; wrist: Wrist; patch: string | null } | { type: 'reload'; wrist: Wrist }
-  | { type: 'assignStick'; wrist: Wrist; id: string | null; label?: string };
+  | { type: 'assignStick'; wrist: Wrist; id: string | null; label?: string }
+  | { type: 'replay'; label: string; wrist: Wrist; loop: boolean } | { type: 'replayStop' };
 export interface ServerOptions { port: number; publicDir: string; view: () => View; log: Log; onCommand: (c: Command, source: 'page' | 'admin') => Promise<void> | void; broadcastMs?: number }
 
 const MIME: Record<string, string> = {
@@ -91,6 +92,11 @@ export function parseCommand(x: unknown): Command | string {
       if (x.label !== undefined && typeof x.label !== 'string') return bad('label must be a string');
       return x.label === undefined ? { type: 'assignStick', wrist: x.wrist, id: x.id } : { type: 'assignStick', wrist: x.wrist, id: x.id, label: x.label };
     }
+    case 'replay': {
+      if (typeof x.label !== 'string' || !/^[A-Za-z0-9_.-]+$/.test(x.label) || !isWrist(x.wrist)) return bad('needs label (letters, digits, _ . -) and wrist');
+      return { type: 'replay', label: x.label, wrist: x.wrist, loop: x.loop === true };
+    }
+    case 'replayStop': return { type: 'replayStop' };
     default: return `unknown command type ${JSON.stringify(x.type)}`;
   }
 }

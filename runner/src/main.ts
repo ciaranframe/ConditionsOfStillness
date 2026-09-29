@@ -10,11 +10,12 @@ import { StateStore } from './state.ts';
 import { AirkitLink } from './airkit.ts';
 import { Show } from './show.ts';
 import { StickIngest } from './sticks.ts';
+import { Replay } from './replay.ts';
 import { startPedal } from './pedal.ts';
 import { startServer, type Command } from './server.ts';
 import { buildView } from './view.ts';
 import { parseCast, assignStickInFile, DEFAULT_CAST, type Cast } from './cast.ts';
-import { parseScenes, parseRosterFile, slotsOf, AUDITION_SLOT } from './scenes.ts';
+import { parseScenes, parseRosterFile, slotsOf, AUDITION_SLOT, type Wrist } from './scenes.ts';
 
 export interface MainOptions {
   repoRoot: string; scenesPath: string; castPath: string; statePath: string;
@@ -87,9 +88,12 @@ export async function main(overrides: Partial<MainOptions> = {}): Promise<Runnin
   const show = new Show({ scenes: first.file?.scenes ?? [], airkit, cast: () => cast, store, log: (m, l) => log.line(m, l) });
   if (!first.file) { show.scenesError = first.errors.join('\n'); log.line(`scenes file: ${show.scenesError}`, 'error'); }
 
+  // One IMU path for real sticks and replayed takes; a replayed wrist mutes its real stick meanwhile.
+  const forwardImu = (w: Wrist, floats: number[]) => { for (const s of slotsOf(w)) airkit.forwardImu(s, floats); if (show.auditionWrist === w) airkit.forwardImu(AUDITION_SLOT, floats); };
+  const replay = new Replay({ takesDir: join(repoRoot, 'takes'), onImu: forwardImu, log: (m, l) => log.line(m, l) });
   const sticks = new StickIngest({
     port: stickPort, cast: () => cast, log: (m) => log.line(m),
-    onImu: (w, floats) => { for (const s of slotsOf(w)) airkit.forwardImu(s, floats); if (show.auditionWrist === w) airkit.forwardImu(AUDITION_SLOT, floats); },
+    onImu: (w, floats) => { if (!replay.active(w)) forwardImu(w, floats); },
     onAux: (w, kind, args) => { for (const s of slotsOf(w)) airkit.forwardAux(s, kind, args); if (show.auditionWrist === w) airkit.forwardAux(AUDITION_SLOT, kind, args); },
   });
   const pedal = await startPedal({
@@ -157,6 +161,8 @@ export async function main(overrides: Partial<MainOptions> = {}): Promise<Runnin
       case 'resume': await show.resume(); return;
       case 'audition': show.audition(c.wrist, c.patch); return;
       case 'reload': show.reloadWrist(c.wrist); return;
+      case 'replay': replay.play(c.label, c.wrist, c.loop); return;
+      case 'replayStop': replay.stop(); return;
       case 'assignStick': {
         const tmp = `${castPath}.tmp`;
         writeFileSync(tmp, assignStickInFile(readOrNull(castPath) ?? '', c.wrist, c.id, c.label));
@@ -169,9 +175,10 @@ export async function main(overrides: Partial<MainOptions> = {}): Promise<Runnin
   };
   const server = await startServer({
     port: webPort, publicDir, log, onCommand,
-    view: () => buildView({ show, sticks, airkit, pedal: pedal.status, castError: () => castError }),
-  }).catch((e: unknown) => { pedal.close(); sticks.close(); airkit.close(); throw e; });
+    view: () => buildView({ show, sticks, airkit, replay, pedal: pedal.status, castError: () => castError }),
+  }).catch((e: unknown) => { pedal.close(); sticks.close(); airkit.close(); replay.dispose(); throw e; });
   show.on('change', () => server.broadcast());
+  replay.on('change', () => server.broadcast());
   airkit.on('online', () => {
     if (show.scenesError !== null || JSON.stringify(liveRoster()) !== validatedRoster) void queueReload(true);
   });
@@ -196,7 +203,7 @@ export async function main(overrides: Partial<MainOptions> = {}): Promise<Runnin
     if (debounce) clearTimeout(debounce);
     for (const w of watchers) w.close();
     await reloading;   // let an in-flight reload finish against live objects
-    server.close(); sticks.close(); pedal.close(); show.dispose(); airkit.close();
+    server.close(); sticks.close(); pedal.close(); replay.dispose(); show.dispose(); airkit.close();
   };
 
   try {

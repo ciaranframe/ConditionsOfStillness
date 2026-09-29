@@ -78,7 +78,15 @@ Admin and the previous scenes are kept. Port changes need a runner restart.
 - `http://<laptop>:3000/perform` — the performers' view: current and next scene, the four wrists,
   NEXT and BACK.
 - `http://<laptop>:3000/admin` — the operator's view on the iPad: status strip, scene list and
-  jump, trims and master, stick assignment, audition, reload, PANIC and RESUME, pedal, log.
+  jump, trims and master, stick assignment, audition, reload, PANIC and RESUME, pedal, take
+  replay, log.
+
+**Replaying a take** (Admin › REPLAY TAKE): pick a take from `takes/INDEX.md`, a wrist, LOOP if
+wanted, PLAY. The take's rows go into that wrist's slots exactly as its stick would send them, so
+whatever sound the current scene (or an audition) has on that wrist plays the recorded gesture.
+The wrist reads alive while it is replayed and its real stick, if any, is muted meanwhile; STOP
+(or the end of the take) hands the wrist back to the stick. One replay at a time. The same takes
+drive `npm run patch:audition -- <Name> --take <label>` headlessly.
 - Keys on both pages: Space or → = next, ← = back.
 
 ## Pedal
@@ -224,7 +232,15 @@ Admin and the previous scenes are kept. Port changes need a runner restart.
 - `http://<laptop>:3000/perform` — the performers' view: current and next scene, the four wrists,
   NEXT and BACK.
 - `http://<laptop>:3000/admin` — the operator's view on the iPad: status strip, scene list and
-  jump, trims and master, stick assignment, audition, reload, PANIC and RESUME, pedal, log.
+  jump, trims and master, stick assignment, audition, reload, PANIC and RESUME, pedal, take
+  replay, log.
+
+**Replaying a take** (Admin › REPLAY TAKE): pick a take from `takes/INDEX.md`, a wrist, LOOP if
+wanted, PLAY. The take's rows go into that wrist's slots exactly as its stick would send them, so
+whatever sound the current scene (or an audition) has on that wrist plays the recorded gesture.
+The wrist reads alive while it is replayed and its real stick, if any, is muted meanwhile; STOP
+(or the end of the take) hands the wrist back to the stick. One replay at a time. The same takes
+drive `npm run patch:audition -- <Name> --take <label>` headlessly.
 - Keys on both pages: Space or → = next, ← = back.
 
 ## Pedal

@@ -5,8 +5,9 @@
 4. AIRKIT OK, AUDIO OK, CPU under 70 %.
 5. NEXT from STANDBY to A; hear the crossfade; NEXT to B; BACK to A. Watch the FADING tags.
 6. Audition a patch on one wrist from Admin; turn it off.
-7. PANIC, then RESUME.
-8. Batteries above 50 % before the run.
+7. REPLAY TAKE from Admin: play `Still1` into a wrist with no stick and watch its strip go alive; STOP.
+8. PANIC, then RESUME.
+9. Batteries above 50 % before the run.
 
 ## Recording a take (for patch auditions)
 Record a few real gestures per wrist once the sticks are assigned — `take:record` listens on UDP 8001, not the runner's 8000.

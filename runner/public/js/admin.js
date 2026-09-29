@@ -209,6 +209,34 @@ function Heard({ view, online, onAssign }) {
   </div>`;
 }
 
+function ReplayPanel({ view, online, onPlay, onStop }) {
+  const [label, setLabel] = useState('');
+  const [wrist, setWrist] = useState('ZL');
+  const [loop, setLoop] = useState(false);
+  const rp = view.replay;
+  const takes = view.takes.filter((t) => t.exists);
+  const chosen = takes.some((t) => t.label === label) ? label : (takes[0] ? takes[0].label : '');
+  const fmt = (s) => { s = Math.max(0, Math.floor(s)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+  return html`<div class="panel box replay">
+    <div class="box-head"><div class="label">REPLAY TAKE</div>
+      ${rp && html`<div class="replay-now">${rp.label} → ${view.wrists[rp.wrist].label} ${fmt(rp.elapsedSec)} / ${fmt(rp.seconds)}${rp.loop ? ' ∞' : ''}</div>`}</div>
+    ${takes.length === 0 ? html`<div class="empty">no takes in takes/INDEX.md — record one with npm run take:page</div>` : html`
+      <div class="replay-row">
+        <select value=${rp ? rp.label : chosen} disabled=${!online || !!rp} aria-label="Take to replay" onChange=${(e) => setLabel(e.currentTarget.value)}>
+          ${takes.map((t) => html`<option key=${t.label} value=${t.label}>${t.label} · ${t.seconds} s${t.what ? ` · ${t.what}` : ''}</option>`)}
+        </select>
+      </div>
+      <div class="replay-row">
+        <select value=${rp ? rp.wrist : wrist} disabled=${!online || !!rp} aria-label="Wrist to replay into" onChange=${(e) => setWrist(e.currentTarget.value)}>
+          ${WRISTS.map((w) => html`<option key=${w} value=${w}>${w} · ${view.wrists[w].label}</option>`)}
+        </select>
+        <label class="replay-loop"><input type="checkbox" checked=${loop} disabled=${!online || !!rp} onChange=${(e) => setLoop(e.currentTarget.checked)} /> LOOP</label>
+        ${rp ? html`<button class="btn btn-bad" disabled=${!online} onClick=${onStop} aria-label="Stop the replay">STOP</button>`
+             : html`<button class="btn btn-primary" disabled=${!online || !chosen} onClick=${() => onPlay(chosen, wrist, loop)} aria-label="Play the take into the wrist">PLAY</button>`}
+      </div>`}
+  </div>`;
+}
+
 function Admin() {
   const [view, setView] = useState(null);
   const [online, setOnline] = useState(false);
@@ -264,6 +292,9 @@ function Admin() {
           onTap=${(i) => { if (online && !panicked) arm('jump', i, () => send({ type: 'jump', index: i })); }} />
         <${Heard} view=${view} online=${online}
           onAssign=${(h, wrist) => { if (wrist || h.wrist) send(wrist ? { type: 'assignStick', wrist, id: h.id } : { type: 'assignStick', wrist: h.wrist, id: null }); }} />
+        <${ReplayPanel} view=${view} online=${online}
+          onPlay=${(label, wrist, loop) => send({ type: 'replay', label, wrist, loop })}
+          onStop=${() => send({ type: 'replayStop' })} />
         <div class="cue-buttons">
           <button class="btn btn-back" disabled=${!canBack} onClick=${() => send({ type: 'cue', action: 'back' })} aria-label="Back one scene">BACK</button>
           <button class="btn btn-primary btn-next" disabled=${!canNext} onClick=${() => send({ type: 'cue', action: 'next' })} aria-label="Next scene">
