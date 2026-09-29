@@ -1,4 +1,4 @@
 branch=AirConditions
-sha=337ad82672cd50c17b535ac415ddd571297fdbe2
+sha=e652afba429476228c43d00075e15191ab18d862
 upstream=https://github.com/sohla/AirKit.git
 mirror=https://github.com/ciaranframe/AirKit-conditions.git
