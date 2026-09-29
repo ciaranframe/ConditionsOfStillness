@@ -22,7 +22,7 @@ export interface View {
   wrists: Record<Wrist, WristView>; status: StatusCell[];
   engine: { online: boolean; cpu: number; limiterOn: boolean; deviceCount: number; host: string; port: number; levelsAgeMs: number | null };
   slots: Array<{ slot: number; stick: string; name: string; tickAgeMs: number; ready: boolean; live: boolean }>;
-  pedal: PedalStatus; heard: HeardStick[]; audition: { wrist: Wrist; patch: string } | null; lastCue: LastCue | null;
+  pedal: PedalStatus; heard: HeardStick[]; audition: { wrist: Wrist; patch: string; peak: number; rms: number } | null; lastCue: LastCue | null;
   scenesError: string | null; castError: string | null; masterDb: number; masterPeak: number; roster: string[];
   replay: ReplayState | null; takes: TakeInfo[];
 }
@@ -129,7 +129,10 @@ export function buildView(d: ViewDeps): View {
     scenes: show.scenes.map((s) => sceneView(s)!),
     wrists, status: cells,
     engine: { online, cpu: status?.serverCpu ?? 0, limiterOn: !!status?.limiterOn, deviceCount: status?.deviceCount ?? 0, host: airkit.host, port: airkit.port, levelsAgeMs },
-    slots, pedal, heard: sticks.heard(), audition: show.auditionState, lastCue: show.lastCue,
+    slots, pedal, heard: sticks.heard(),
+    // slot 9's own meter (the engine broadcasts it as the audition pair) so an audition is not blind on Admin
+    audition: show.auditionState ? { ...show.auditionState, peak: levels?.audition[0] ?? 0, rms: levels?.audition[1] ?? 0 } : null,
+    lastCue: show.lastCue,
     scenesError: show.scenesError, castError: d.castError(), masterDb: show.masterDb, masterPeak: levels?.master[0] ?? 0, roster: airkit.roster,
     replay: d.replay?.state() ?? null, takes: d.replay?.list() ?? [],
   };

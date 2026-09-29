@@ -88,7 +88,9 @@ function StickStrip({ w, view, online, trim, onTrim, onTrimEnd, pickerOpen, onPi
   const s = view.wrists[w];
   const silent = s.patch === 'silence' && !s.incoming;
   const auditioning = view.audition && view.audition.wrist === w ? view.audition.patch : null;
-  const meterPct = Math.min(100, (s.rms * 100) / 0.5);           // −6 dBFS RMS fills it
+  // while this wrist auditions, the meter shows slot 9 (what is actually heard), not the wrist's silent slot
+  const lv = auditioning ? view.audition : s;
+  const meterPct = Math.min(100, (lv.rms * 100) / 0.5);          // −6 dBFS RMS fills it
   return html`<div class="panel strip-card" style=${`border-color:${stateBorder(s.state)}`}>
     <div class="stick-head"><div class="stick-name">${s.label}</div><div class="who">${s.who}</div></div>
     <div class="patch" style=${`color:${silent ? DIM : '#fff'}`}>${s.incoming ? `${s.patch} → ${s.incoming}` : s.patch}</div>
@@ -102,7 +104,7 @@ function StickStrip({ w, view, online, trim, onTrim, onTrimEnd, pickerOpen, onPi
     <div class="faders">
       <div class="meter-col">
         <div class="meter" aria-label="Level meter"><div style=${`height:${meterPct.toFixed(1)}%`}></div></div>
-        <div class="small">${dbfs(s.peak)}</div>
+        <div class="small">${auditioning ? 'AUD ' : ''}${dbfs(lv.peak)}</div>
       </div>
       <div class="trim-col">
         <label class="small" for=${`trim-${w}`}>TRIM</label>
